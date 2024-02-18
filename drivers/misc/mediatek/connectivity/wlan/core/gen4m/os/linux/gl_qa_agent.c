@@ -83,7 +83,6 @@
  */
 
 struct PARAM_RX_STAT g_HqaRxStat;
-struct list_mode_event g_HqaListModeStatus;
 uint32_t u4RxStatSeqNum;
 u_int8_t g_DBDCEnable = FALSE;
 /* For SA Buffer Mode Temp Solution */
@@ -1120,7 +1119,7 @@ static int32_t HQA_SetChannel(struct net_device *prNetDev,
 	DBGLOG(RFTEST, INFO,
 	       "QA_AGENT HQA_SetChannel Channel = %d\n", i4SetChan);
 
-	i4SetFreq = nicChannelNum2Freq(i4SetChan, BAND_NULL);
+	i4SetFreq = nicChannelNum2Freq(i4SetChan);
 	i4Ret = MT_ATESetChannel(prNetDev, 0, i4SetFreq);
 
 	ResponseToQA(HqaCmdFrame, prIwReqData, 2, i4Ret);
@@ -3410,7 +3409,7 @@ static int32_t HQA_DBDCContinuousTX(struct net_device
 
 	if (u4Control) {
 		MT_ATESetDBDCBandIndex(prNetDev, u4Band);
-		u4Freq = nicChannelNum2Freq(u4Central_Ch, u4Band);
+		u4Freq = nicChannelNum2Freq(u4Central_Ch);
 		MT_ATESetChannel(prNetDev, 0, u4Freq);
 		ucPriChOffset = _whPhyGetPrimChOffset(u4BW,
 						      u4Pri_Ch,
@@ -8375,6 +8374,38 @@ int32_t connacGetICapStatus(struct GLUE_INFO *prGlueInfo)
 	return 1;
 }
 
+int32_t commonGetICapIQData(struct GLUE_INFO *prGlueInfo,
+			    uint8_t *pData, uint32_t u4IQType, uint32_t u4WFNum)
+{
+	struct ADAPTER *prAdapter;
+	uint32_t u4TempLen = 0;
+	uint32_t u4DataLen = 0;
+	int32_t *prIQAry;
+	int32_t i = 0;
+
+	ASSERT(prGlueInfo);
+	prAdapter = prGlueInfo->prAdapter;
+	ASSERT(prAdapter);
+
+	if (u4WFNum <= 1) {
+		GetIQData(prAdapter, &prIQAry, &u4DataLen, u4IQType,
+			  u4WFNum);
+		u4TempLen = u4DataLen;
+		u4DataLen /= 4;
+
+		u4DataLen = ntohl(u4DataLen);
+		memcpy(pData + 2 + 4 * 3, (uint8_t *) &u4DataLen,
+		       sizeof(u4DataLen));
+
+		for (i = 0; i < u4TempLen / sizeof(uint32_t); i++)
+			prIQAry[i] = ntohl(prIQAry[i]);
+
+		memcpy(pData + 2 + 4 * 4, (uint8_t *) &prIQAry[0],
+		       u4TempLen);
+	}
+	return u4TempLen;
+}
+
 int32_t connacGetICapIQData(struct GLUE_INFO *prGlueInfo,
 			    uint8_t *pData, uint32_t u4IQType, uint32_t u4WFNum)
 {
@@ -8544,12 +8575,12 @@ static int32_t hqa_set_channel_ext(struct net_device
 	} else if (u4Central_ch0 == 6 && u4Ch_band == 1) {
 		u4SetFreq = 1000 * 5032;
 	} else {
-		u4SetFreq = nicChannelNum2Freq(u4Central_ch0, BAND_NULL);
+		u4SetFreq = nicChannelNum2Freq(u4Central_ch0);
 	}
 	MT_ATESetChannel(prNetDev, 0, u4SetFreq);
 
 	if (u4Sys_bw == 6) {
-		u4SetFreq = nicChannelNum2Freq(u4Central_ch1, BAND_NULL);
+		u4SetFreq = nicChannelNum2Freq(u4Central_ch1);
 		MT_ATESetChannel(prNetDev, 1, u4SetFreq);
 	}
 

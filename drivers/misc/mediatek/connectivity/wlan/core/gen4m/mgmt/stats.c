@@ -47,21 +47,6 @@ enum EVENT_TYPE {
  *            P U B L I C   D A T A
  *******************************************************************************
  */
-/* function pointer array for tx stats*/
-static struct STATS_TLV_HDLR_T apfnTxTbl[STATS_TX_TAG_MAX_NUM] = {
-	{statsTxGetQueuetLen, statsTxQueueHdlr},
-	{statsTxGetPerBssLen, statsTxTlvBss0Hdlr},
-	{statsTxGetTimeLen, statsTxTimeHdlr},
-};
-
-static struct STATS_TLV_HDLR_T apfnRxTbl[STATS_RX_TAG_MAX_NUM] = {
-	{statsGetTlvU8Len, statsRxReorderDropHdlr},
-};
-
-static struct STATS_TLV_HDLR_T apfnCgsTbl[STATS_CGS_TAG_MAX_NUM] = {
-	{statsGetTlvU8Len, statsCgsB0IdleSlotHdlr},
-	{statsCgsGetAirLatLen, statsCgsAirLatHdlr},
-};
 
 /*******************************************************************************
  *            P R I V A T E  F U N C T I O N S
@@ -153,7 +138,7 @@ void StatsEnvRxTime2Host(IN struct ADAPTER *prAdapter,
 	uint64_t u8IntTime = 0;
 	uint64_t u8RxTime = 0;
 	uint32_t u4Delay = 0;
-	struct timespec64 tval;
+	struct timeval tval;
 	struct rtc_time tm;
 
 	u2EthType = (pucEth[ETH_TYPE_LEN_OFFSET] << 8)
@@ -180,8 +165,8 @@ void StatsEnvRxTime2Host(IN struct ADAPTER *prAdapter,
 	u8IntTime = GLUE_RX_GET_PKT_INT_TIME(prSkb);
 	u4Delay = ((uint32_t)(sched_clock() - u8IntTime))/NSEC_PER_USEC;
 	u8RxTime = GLUE_RX_GET_PKT_RX_TIME(prSkb);
-	ktime_get_ts64(&tval);
-	rtc_time64_to_tm(tval.tv_sec, &tm);
+	do_gettimeofday(&tval);
+	rtc_time_to_tm(tval.tv_sec, &tm);
 
 	switch (ucIpProto) {
 	case IP_PRO_TCP:
@@ -197,13 +182,13 @@ void StatsEnvRxTime2Host(IN struct ADAPTER *prAdapter,
 			break;
 		}
 		DBGLOG(RX, INFO,
-	"IPID 0x%04x src %d dst %d UP %d,delay %u us,int2rx %lu us,IntTime %llu,%u/%u,leave at %02d:%02d:%02d.%09ld\n",
+	"IPID 0x%04x src %d dst %d UP %d,delay %u us,int2rx %lu us,IntTime %llu,%u/%u,leave at %02d:%02d:%02d.%06ld\n",
 			u2IPID, u2UdpSrcPort, u2UdpDstPort,
 			((pucEth[1] & IPTOS_PREC_MASK) >> IPTOS_PREC_OFFSET),
 			u4Delay,
 			((uint32_t)(u8RxTime - u8IntTime))/NSEC_PER_USEC,
 			u8IntTime, u4NoDelayRx, u4TotalRx,
-			tm.tm_hour, tm.tm_min, tm.tm_sec, tval.tv_nsec);
+			tm.tm_hour, tm.tm_min, tm.tm_sec, tval.tv_usec);
 		break;
 	default:
 		break;
@@ -314,7 +299,7 @@ void statsParseARPInfo(struct sk_buff *skb,
 	case EVENT_RX:
 		GLUE_SET_INDEPENDENT_PKT(skb, TRUE);
 		if (u2OpCode == ARP_PRO_REQ)
-			DBGLOG(RX, INFO,
+			DBGLOG_LIMITED(RX, INFO,
 				"<RX> Arp Req From IP: " IPV4STR "\n",
 				IPV4TOSTR(&pucEthBody[ARP_SENDER_IP_OFFSET]));
 		else if (u2OpCode == ARP_PRO_RSP)
@@ -429,8 +414,7 @@ void statsParseUDPInfo(struct sk_buff *skb, uint8_t *pucEthBody,
 		}
 			break;
 		}
-	} else if (u2UdpSrcPort == UDP_PORT_DNS ||
-			u2UdpDstPort == UDP_PORT_DNS) {
+	} else if (u2UdpSrcPort == UDP_PORT_DNS) { /* tx dns */
 		uint16_t u2TransId =
 			(pucBootp[0] << 8) | pucBootp[1];
 		if (eventType == EVENT_RX) {
@@ -588,7 +572,7 @@ static void statsParsePktInfo(uint8_t *pucPkt, struct sk_buff *skb,
 			}
 				break;
 			case EVENT_TX:
-				DBGLOG(TX, TRACE, "<TX><IPv6> UDP packet\n");
+				DBGLOG(TX, INFO, "<TX><IPv6> UDP packet\n");
 				break;
 			}
 			break;
@@ -705,10 +689,9 @@ static void statsParsePktInfo(uint8_t *pucPkt, struct sk_buff *skb,
 			WLAN_GET_FIELD_BE16(&pucEapol[5], &u2KeyInfo);
 			switch (eventType) {
 			case EVENT_RX:
-				if ((u2KeyInfo & 0x1100) == 0x0000 ||
-					(u2KeyInfo & 0x0008) == 0x0000)
+				if ((u2KeyInfo & 0xfff0) == 0x0080)
 					m = 1;
-				else
+				else if ((u2KeyInfo & 0xfff0) == 0x13c0)
 					m = 3;
 				DBGLOG(RX, INFO,
 					"<RX> EAPOL: key, M%d, KeyInfo 0x%04x\n",
@@ -822,385 +805,6 @@ void StatsTxPktInfoDisplay(struct sk_buff *prSkb)
 
 	pPkt = prSkb->data;
 	statsParsePktInfo(pPkt, prSkb, 0, EVENT_TX);
-}
-
-uint32_t
-statsGetTlvU2Len(void)
-{
-	return (uint32_t)(sizeof(uint16_t) + sizeof(struct STATS_TRX_TLV_T));
-}
-
-uint32_t
-statsGetTlvU4Len(void)
-{
-	return (uint32_t)(sizeof(uint32_t) + sizeof(struct STATS_TRX_TLV_T));
-}
-
-uint32_t
-statsGetTlvU8Len(void)
-{
-	return (uint32_t)(sizeof(uint64_t) + sizeof(struct STATS_TRX_TLV_T));
-}
-
-uint32_t
-statsTxGetQueuetLen(void)
-{
-	return (uint32_t)(sizeof(struct STATS_TX_QUEUE_STAT_T) +
-		sizeof(struct STATS_TRX_TLV_T));
-}
-
-uint32_t
-statsTxGetPerBssLen(void)
-{
-	return (uint32_t)(sizeof(struct STATS_TX_PER_BSS_STAT_T) +
-		sizeof(struct STATS_TRX_TLV_T));
-}
-
-uint32_t
-statsTxGetTimeLen(void)
-{
-	return (uint32_t)(sizeof(struct STATS_TX_TIME_STAT_T) +
-		sizeof(struct STATS_TRX_TLV_T));
-}
-
-uint32_t
-statsCgsGetAirLatLen(void)
-{
-	return (uint32_t)(sizeof(struct STATS_CGS_LAT_STAT_T) +
-		sizeof(struct STATS_TRX_TLV_T));
-}
-
-uint32_t
-statsTxGetTlvStatTotalLen(void)
-{
-	uint32_t u4TlvLen = 0;
-	uint32_t u4TlvIdx = 0;
-
-	for (u4TlvIdx = 0; u4TlvIdx < STATS_TX_TAG_MAX_NUM; u4TlvIdx++) {
-		if (apfnTxTbl[u4TlvIdx].pfnTlvGetLen)
-			u4TlvLen += apfnTxTbl[u4TlvIdx].pfnTlvGetLen();
-	}
-	DBGLOG(TX, TRACE, "%s=%u\n", __func__, u4TlvLen);
-	return u4TlvLen;
-}
-
-uint32_t
-statsRxGetTlvStatTotalLen(void)
-{
-	uint32_t u4TlvLen = 0;
-	uint32_t u4TlvIdx = 0;
-
-	for (u4TlvIdx = 0; u4TlvIdx < STATS_RX_TAG_MAX_NUM; u4TlvIdx++) {
-		if (apfnRxTbl[u4TlvIdx].pfnTlvGetLen)
-			u4TlvLen += apfnRxTbl[u4TlvIdx].pfnTlvGetLen();
-	}
-	DBGLOG(RX, TRACE, "%s=%u\n", __func__, u4TlvLen);
-	return u4TlvLen;
-}
-
-uint32_t
-statsCgsGetTlvStatTotalLen(void)
-{
-	uint32_t u4TlvLen = 0;
-	uint32_t u4TlvIdx = 0;
-
-	for (u4TlvIdx = 0; u4TlvIdx < STATS_CGS_TAG_MAX_NUM; u4TlvIdx++) {
-		if (apfnCgsTbl[u4TlvIdx].pfnTlvGetLen)
-			u4TlvLen += apfnCgsTbl[u4TlvIdx].pfnTlvGetLen();
-	}
-	DBGLOG(TX, TRACE, "%s=%u\n", __func__, u4TlvLen);
-	return u4TlvLen;
-}
-
-void
-statsTxQueueHdlr(struct GLUE_INFO *prGlueInfo,
-	struct STATS_TRX_TLV_T *prTlvList, uint32_t u4TlvLen)
-{
-	struct ADAPTER *prAdapter;
-	struct BUS_INFO *prBusInfo;
-	struct PLE_TOP_CR *prCr;
-	struct CMD_ACCESS_REG rCmdAccessReg;
-	struct STATS_TRX_TLV_T *prStatTlv = prTlvList;
-	struct STATS_TX_QUEUE_STAT_T *prQueueStat;
-	uint32_t u4MsduTokenUsed = 0;
-	uint32_t u4BufLen = 0;
-	uint32_t rStatus;
-
-	prQueueStat = (struct STATS_TX_QUEUE_STAT_T *)(
-		&prStatTlv->aucBuffer[0]);
-	/* MSDU token */
-	prAdapter = prGlueInfo->prAdapter;
-	u4MsduTokenUsed = prGlueInfo->rHifInfo.rTokenInfo.u4UsedCnt;
-	prQueueStat->u4MsduTokenUsed = u4MsduTokenUsed;
-	prQueueStat->u4MsduTokenRsvd = HIF_TX_MSDU_TOKEN_NUM - u4MsduTokenUsed;
-
-	/* ple hif */
-	prBusInfo = prAdapter->chip_info->bus_info;
-	prCr = prBusInfo->prPleTopCr;
-	rCmdAccessReg.u4Address = prCr->rHifPgInfo.u4Addr;
-	rCmdAccessReg.u4Data = 0;
-
-	rStatus = kalIoctl(prGlueInfo, wlanoidQueryMcrRead,
-			&rCmdAccessReg, sizeof(rCmdAccessReg),
-			TRUE, TRUE, TRUE, &u4BufLen);
-	prQueueStat->u4PleHifUsed = ((rCmdAccessReg.u4Data &
-		prCr->rHifPgInfoHifSrcCnt.u4Mask) >>
-		prCr->rHifPgInfoHifSrcCnt.u4Shift);
-	prQueueStat->u4PleHifRsvd = ((rCmdAccessReg.u4Data &
-		prCr->rHifPgInfoHifRsvCnt.u4Mask) >>
-		prCr->rHifPgInfoHifRsvCnt.u4Shift);
-
-	prStatTlv->u4Tag = STATS_TX_TAG_QUEUE;
-	prStatTlv->u4Len = u4TlvLen;
-	prTlvList += u4TlvLen;
-	DBGLOG(TX, TRACE, "len=%u Msdu=[%u/%u] PLE Hif=[0x%03x/0x%03x]\n",
-		u4TlvLen, prQueueStat->u4MsduTokenUsed,
-		prQueueStat->u4MsduTokenRsvd,
-		prQueueStat->u4PleHifUsed, prQueueStat->u4PleHifRsvd);
-}
-
-void
-statsTxTlvBss0Hdlr(struct GLUE_INFO *prGlueInfo,
-	struct STATS_TRX_TLV_T *prTlvList, uint32_t u4TlvLen)
-{
-	struct PARAM_GET_LINK_QUALITY_INFO rParam;
-	struct WIFI_LINK_QUALITY_INFO rLinkQualityInfo;
-	struct STATS_TRX_TLV_T *prStatTlv = prTlvList;
-	struct STATS_TX_PER_BSS_STAT_T *prBssStat;
-	uint32_t u4BufLen;
-	int32_t i4Status;
-	uint64_t u8Retry = 0;
-	uint64_t u8RtsFail = 0;
-	uint64_t u8AckFail = 0;
-
-	prBssStat = (struct STATS_TX_PER_BSS_STAT_T *)(
-		&prStatTlv->aucBuffer[0]);
-	rParam.ucBssIdx = 0; /* prNetDevPrivate->ucBssIdx; */
-	rParam.prLinkQualityInfo = &rLinkQualityInfo;
-	i4Status = kalIoctl(prGlueInfo, wlanoidGetLinkQualityInfo,
-		 &rParam, sizeof(struct PARAM_GET_LINK_QUALITY_INFO),
-		 TRUE, FALSE, FALSE, &u4BufLen);
-	if (i4Status != WLAN_STATUS_SUCCESS)
-		DBGLOG(REQ, ERROR, "wlanoidGetLinkQualityInfo error\n");
-	else {
-		if (kalGetMediaStateIndicated(prGlueInfo,
-			AIS_DEFAULT_INDEX) == MEDIA_STATE_CONNECTED) {
-			u8Retry = rLinkQualityInfo.u8TxRetryCount;
-			u8RtsFail = rLinkQualityInfo.u8TxRtsFailCount;
-			u8AckFail = rLinkQualityInfo.u8TxAckFailCount;
-		} else {
-			DBGLOG(TX, TRACE, "Bss0 not connected yet.\n");
-		}
-	}
-	prBssStat->u8Retry = u8Retry;
-	prBssStat->u8RtsFail = u8RtsFail;
-	prBssStat->u8AckFail = u8AckFail;
-	prStatTlv->u4Tag = STATS_TX_TAG_BSS0;
-	prStatTlv->u4Len = u4TlvLen;
-	prTlvList += u4TlvLen;
-	DBGLOG(TX, TRACE, "Bss0 len=%u retry=%lu RtsFail=%lu AckFail=%lu\n",
-		u4TlvLen, prBssStat->u8Retry, prBssStat->u8RtsFail,
-		prBssStat->u8AckFail);
-}
-
-void
-statsTxTimeHdlr(struct GLUE_INFO *prGlueInfo,
-	struct STATS_TRX_TLV_T *prTlvList, uint32_t u4TlvLen)
-{
-	struct STATS_TRX_TLV_T *prStatTlv = prTlvList;
-	struct STATS_TX_TIME_STAT_T *prTimeStat;
-#if CFG_SUPPORT_TX_LATENCY_STATS
-	struct ADAPTER *prAdapter = prGlueInfo->prAdapter;
-	struct TX_LATENCY_STATS *stats;
-	uint32_t au4Success[TX_TIME_CAT_NUM];
-	uint32_t au4Fail[TX_TIME_CAT_NUM];
-	uint8_t i;
-#endif
-
-	prTimeStat = (struct STATS_TX_TIME_STAT_T *)(
-		&prStatTlv->aucBuffer[0]);
-	kalMemZero(prTimeStat->au4Success, sizeof(uint32_t) * TX_TIME_CAT_NUM);
-	kalMemZero(prTimeStat->au4Fail, sizeof(uint32_t) * TX_TIME_CAT_NUM);
-
-#if CFG_SUPPORT_TX_LATENCY_STATS
-	stats = &prAdapter->rMsduReportStats.rCounting;
-	for (i = 0; i < TX_TIME_CAT_NUM; i++) {
-		au4Success[i] = GLUE_GET_REF_CNT(stats->au4ConnsysLatency[i]);
-		au4Fail[i] = GLUE_GET_REF_CNT(stats->au4FailConnsysLatency[i]);
-	}
-	kalMemCopy(prTimeStat->au4Success, au4Success,
-		sizeof(uint32_t) * TX_TIME_CAT_NUM);
-	kalMemCopy(prTimeStat->au4Fail, au4Fail,
-		sizeof(uint32_t) * TX_TIME_CAT_NUM);
-#else
-	DBGLOG(TX, INFO, "tx latency not support.\n");
-#endif
-	prStatTlv->u4Tag = STATS_TX_TAG_TIME;
-	prStatTlv->u4Len = u4TlvLen;
-	prTlvList += u4TlvLen;
-	DBGLOG(TX, TRACE,
-		"Time len=%u success=%u/%u/%u/%u/%u fail=%u/%u/%u/%u/%u\n",
-		u4TlvLen, prTimeStat->au4Success[0], prTimeStat->au4Success[1],
-		prTimeStat->au4Success[2], prTimeStat->au4Success[3],
-		prTimeStat->au4Success[4], prTimeStat->au4Fail[0],
-		prTimeStat->au4Fail[1], prTimeStat->au4Fail[2],
-		prTimeStat->au4Fail[3], prTimeStat->au4Fail[4]);
-}
-
-void
-statsRxReorderDropHdlr(struct GLUE_INFO *prGlueInfo,
-	struct STATS_TRX_TLV_T *prTlvList, uint32_t u4TlvLen)
-{
-	struct ADAPTER *prAdapter = prGlueInfo->prAdapter;
-	struct STATS_TRX_TLV_T *prStatTlv = prTlvList;
-	uint64_t *pu8RxReorderDrop = (uint64_t *)(&prStatTlv->aucBuffer[0]);
-
-	*pu8RxReorderDrop = RX_GET_CNT(&prAdapter->rRxCtrl,
-		RX_REORDER_BEHIND_DROP_COUNT);
-	prStatTlv->u4Tag = STATS_RX_TAG_REORDER_DROP;
-	prStatTlv->u4Len = u4TlvLen;
-	prTlvList += u4TlvLen;
-	DBGLOG(RX, TRACE, "ReorderDrop len=%u val=%lu\n", u4TlvLen,
-		*pu8RxReorderDrop);
-}
-
-void
-statsCgsB0IdleSlotHdlr(struct GLUE_INFO *prGlueInfo,
-	struct STATS_TRX_TLV_T *prTlvList, uint32_t u4TlvLen)
-{
-	struct ADAPTER *prAdapter = prGlueInfo->prAdapter;
-	struct WIFI_LINK_QUALITY_INFO *prLinkQualityInfo;
-	struct STATS_TRX_TLV_T *prStatTlv = prTlvList;
-	uint64_t *pu8B0IdleSlot = (uint64_t *)(&prStatTlv->aucBuffer[0]);
-
-	prLinkQualityInfo = &(prAdapter->rLinkQualityInfo);
-	if (prLinkQualityInfo)
-		*pu8B0IdleSlot = prLinkQualityInfo->u8IdleSlotCount;
-	prStatTlv->u4Tag = STATS_CGS_TAG_B0_IDLE_SLOT;
-	prStatTlv->u4Len = u4TlvLen;
-	prTlvList += u4TlvLen;
-	DBGLOG(TX, TRACE, "B0IdleSlot len=%u val=%lu\n", u4TlvLen,
-		*pu8B0IdleSlot);
-}
-
-void
-statsCgsAirLatHdlr(struct GLUE_INFO *prGlueInfo,
-	struct STATS_TRX_TLV_T *prTlvList, uint32_t u4TlvLen)
-{
-	struct STATS_TRX_TLV_T *prStatTlv = prTlvList;
-	struct STATS_CGS_LAT_STAT_T *prAirLat;
-#if CFG_SUPPORT_LLS
-	union {
-		struct CMD_GET_STATS_LLS cmd;
-		struct EVENT_STATS_LLS_TX_LATENCY latency;
-	} query = {0};
-	uint32_t u4QueryBufLen;
-	uint32_t u4QueryInfoLen;
-	uint32_t rStatus = WLAN_STATUS_SUCCESS;
-#endif
-
-	prAirLat = (struct STATS_CGS_LAT_STAT_T *)(&prStatTlv->aucBuffer[0]);
-	kalMemZero(prAirLat->au4AirLatLvl, sizeof(uint32_t) * AIR_LAT_LVL_NUM);
-	kalMemZero(prAirLat->au4AirLatMpdu, sizeof(uint32_t) * AIR_LAT_CAT_NUM);
-
-#if CFG_SUPPORT_LLS
-	u4QueryBufLen = sizeof(query);
-	u4QueryInfoLen = sizeof(query.cmd);
-
-	kalMemZero(&query, sizeof(query));
-	query.cmd.u4Tag = STATS_LLS_TAG_PPDU_LATENCY;
-
-	rStatus = kalIoctl(prGlueInfo,
-			wlanQueryLinkStats,
-			&query,
-			u4QueryBufLen,
-			TRUE,
-			TRUE,
-			TRUE,
-			&u4QueryInfoLen);
-	DBGLOG(REQ, INFO, "kalIoctl=%x, %u bytes",
-				rStatus, u4QueryInfoLen);
-
-	if (rStatus == WLAN_STATUS_SUCCESS &&
-		u4QueryInfoLen == sizeof(struct EVENT_STATS_LLS_TX_LATENCY)) {
-		DBGLOG(REQ, INFO, "query.latency=%u/%u/%u/%u; %u/%u/%u/%u/%u",
-			query.latency.arLatencyLevel[0],
-			query.latency.arLatencyLevel[1],
-			query.latency.arLatencyLevel[2],
-			query.latency.arLatencyLevel[3],
-			query.latency.arLatencyMpduCntPerLevel[0],
-			query.latency.arLatencyMpduCntPerLevel[1],
-			query.latency.arLatencyMpduCntPerLevel[2],
-			query.latency.arLatencyMpduCntPerLevel[3],
-			query.latency.arLatencyMpduCntPerLevel[4]);
-		kalMemCopy(prAirLat->au4AirLatLvl,
-			query.latency.arLatencyLevel,
-			sizeof(uint32_t) * AIR_LAT_LVL_NUM);
-		kalMemCopy(prAirLat->au4AirLatMpdu,
-			query.latency.arLatencyMpduCntPerLevel,
-			sizeof(uint32_t) * AIR_LAT_CAT_NUM);
-	} else if (rStatus != WLAN_STATUS_SUCCESS) {
-		DBGLOG(REQ, WARN, "wlanQueryLinkStats return fail\n");
-	} else {
-		DBGLOG(REQ, WARN, "wlanQueryLinkStats return len unexpected\n");
-	}
-#else
-	DBGLOG(TX, INFO, "LLS not support.\n");
-#endif
-	prStatTlv->u4Tag = STATS_CGS_TAG_AIR_LAT;
-	prStatTlv->u4Len = u4TlvLen;
-	prTlvList += u4TlvLen;
-	DBGLOG(TX, TRACE, "AirLat len=%u lvl=%u/%u/%u/%u cnt=%u/%u/%u/%u/%u\n",
-		u4TlvLen, prAirLat->au4AirLatLvl[0], prAirLat->au4AirLatLvl[1],
-		prAirLat->au4AirLatLvl[2], prAirLat->au4AirLatLvl[3],
-		prAirLat->au4AirLatMpdu[0], prAirLat->au4AirLatMpdu[1],
-		prAirLat->au4AirLatMpdu[2], prAirLat->au4AirLatMpdu[3],
-		prAirLat->au4AirLatMpdu[4]);
-}
-
-void
-statsGetTxInfoHdlr(struct GLUE_INFO *prGlueInfo,
-	struct STATS_TRX_TLV_T *paucTxTlvList)
-{
-	uint32_t u4TlvIdx = 0;
-	uint32_t u4TlvLen = 0;
-	struct STATS_TRX_TLV_T *prTlvList = paucTxTlvList;
-
-	for (u4TlvIdx = 0; u4TlvIdx < STATS_TX_TAG_MAX_NUM; u4TlvIdx++) {
-		u4TlvLen = apfnTxTbl[u4TlvIdx].pfnTlvGetLen();
-		apfnTxTbl[u4TlvIdx].pfnStstsTlvHdl(prGlueInfo,
-			prTlvList, u4TlvLen);
-	}
-}
-
-void
-statsGetRxInfoHdlr(struct GLUE_INFO *prGlueInfo,
-	struct STATS_TRX_TLV_T *paucRxTlvList)
-{
-	uint32_t u4TlvIdx = 0;
-	uint32_t u4TlvLen = 0;
-	struct STATS_TRX_TLV_T *prTlvList = paucRxTlvList;
-
-	for (u4TlvIdx = 0; u4TlvIdx < STATS_RX_TAG_MAX_NUM; u4TlvIdx++) {
-		u4TlvLen = apfnRxTbl[u4TlvIdx].pfnTlvGetLen();
-		apfnRxTbl[u4TlvIdx].pfnStstsTlvHdl(prGlueInfo,
-			prTlvList, u4TlvLen);
-	}
-}
-
-void
-statsGetCgsInfoHdlr(struct GLUE_INFO *prGlueInfo,
-	struct STATS_TRX_TLV_T *paucCgsTlvList)
-{
-	uint32_t u4TlvIdx = 0;
-	uint32_t u4TlvLen = 0;
-	struct STATS_TRX_TLV_T *prTlvList = paucCgsTlvList;
-
-	for (u4TlvIdx = 0; u4TlvIdx < STATS_CGS_TAG_MAX_NUM; u4TlvIdx++) {
-		u4TlvLen = apfnCgsTbl[u4TlvIdx].pfnTlvGetLen();
-		apfnCgsTbl[u4TlvIdx].pfnStstsTlvHdl(prGlueInfo,
-			prTlvList, u4TlvLen);
-	}
 }
 
 #endif /* CFG_SUPPORT_STATISTICS */

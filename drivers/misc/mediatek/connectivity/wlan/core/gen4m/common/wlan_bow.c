@@ -2286,8 +2286,7 @@ bowIndicationOfMediaStateToHost(IN struct ADAPTER *prAdapter,
 			COPY_MAC_ADDR(rEventConnStatus.aucBssid, prBssInfo->aucBSSID);
 
 			rEventConnStatus.u2BeaconPeriod = prBssInfo->u2BeaconInterval;
-			rEventConnStatus.u4FreqInKHz = nicChannelNum2Freq(
-				prBssInfo->ucPrimaryChannel, prBssInfo->eBand);
+			rEventConnStatus.u4FreqInKHz = nicChannelNum2Freq(prBssInfo->ucPrimaryChannel);
 
 			switch (prBssInfo->ucNonHTBasicPhyType) {
 			case PHY_TYPE_HR_DSSS_INDEX:

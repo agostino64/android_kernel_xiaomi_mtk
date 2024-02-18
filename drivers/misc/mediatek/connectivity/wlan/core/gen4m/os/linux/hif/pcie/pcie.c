@@ -179,8 +179,6 @@ static struct pci_driver mtk_pci_driver = {
 
 static u_int8_t g_fgDriverProbed = FALSE;
 static uint32_t g_u4DmaMask = 32;
-struct pci_dev *g_prDev;
-static void *CSRBaseAddress;
 /*******************************************************************************
  *                                 M A C R O S
  *******************************************************************************
@@ -248,15 +246,7 @@ static void pcieDumpRx(struct GL_HIF_INFO *prHifInfo,
  * \return void
  */
 /*----------------------------------------------------------------------------*/
-
-static struct mt66xx_hif_driver_data *get_platform_driver_data(void)
-{
-	ASSERT(g_prDev);
-	if (!g_prDev)
-		return NULL;
-
-	return (struct mt66xx_hif_driver_data *) pci_get_drvdata(g_prDev);
-}
+static void *CSRBaseAddress;
 
 static irqreturn_t mtk_pci_interrupt(int irq, void *dev_instance)
 {
@@ -271,7 +261,7 @@ static irqreturn_t mtk_pci_interrupt(int irq, void *dev_instance)
 
 	halDisableInterrupt(prGlueInfo->prAdapter);
 
-	if (test_bit(GLUE_FLAG_HALT_BIT, &prGlueInfo->ulFlag)) {
+	if (prGlueInfo->ulFlag & GLUE_FLAG_HALT) {
 		DBGLOG(HAL, INFO, "GLUE_FLAG_HALT skip INT\n");
 		return IRQ_NONE;
 	}
@@ -308,14 +298,17 @@ static int mtk_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto out;
 	}
 
+#if defined(SOC3_0)
+	if ((void *)&mt66xx_driver_data_soc3_0 == (void *)id->driver_data)
+		DBGLOG(INIT, INFO,
+			"[MJ]&mt66xx_driver_data_soc3_0 == id->driver_data\n");
+#endif
+
 	DBGLOG(INIT, INFO, "pci_enable_device done!\n");
 
 	prChipInfo = ((struct mt66xx_hif_driver_data *)
 				id->driver_data)->chip_info;
-	g_prDev = pdev;
 	prChipInfo->pdev = (void *)pdev;
-
-	pci_set_drvdata(pdev, (void *)id->driver_data)
 
 #if (CFG_POWER_ON_DOWNLOAD_EMI_ROM_PATCH == 1)
 		g_fgDriverProbed = TRUE;
@@ -348,8 +341,6 @@ static void mtk_pci_remove(struct pci_dev *pdev)
 
 	/* Unmap CSR base address */
 	iounmap(CSRBaseAddress);
-
-	pci_set_drvdata(pdev, NULL)
 
 	/* release memory region */
 	pci_release_regions(pdev);
@@ -658,17 +649,6 @@ void glGetDev(void *ctx, struct device **dev)
 void glGetHifDev(struct GL_HIF_INFO *prHif, struct device **dev)
 {
 	*dev = &(prHif->pdev->dev);
-}
-
-void glGetChipInfo(void **prChipInfo)
-{
-	struct mt66xx_hif_driver_data *prDriverData;
-
-	prDriverData = get_platform_driver_data();
-	if (!prDriverData)
-		return;
-
-	*prChipInfo = (void *)prDriverData->chip_info;
 }
 
 static void pcieAllocDesc(struct GL_HIF_INFO *prHifInfo,

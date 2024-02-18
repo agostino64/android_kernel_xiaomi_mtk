@@ -377,15 +377,13 @@ enum {
 };
 #endif
 
-#define HQA_CMD_FRAME_DATA_SIZE	4096
-
 struct HQA_CMD_FRAME {
 	uint32_t MagicNo;
 	uint16_t Type;
 	uint16_t Id;
 	uint16_t Length;
 	uint16_t Sequence;
-	uint8_t Data[HQA_CMD_FRAME_DATA_SIZE];
+	uint8_t Data[2048];
 } __KAL_ATTRIB_PACKED__;
 
 typedef int32_t(*HQA_CMD_HANDLER) (struct net_device
@@ -398,17 +396,6 @@ struct HQA_CMD_TABLE {
 	uint32_t CmdSetSize;
 	uint32_t CmdOffset;
 };
-
-struct PARAM_LIST_MODE_STATUS {
-	uint16_t    u2Status;
-	uint32_t    u4ExtId;
-	uint32_t    u4SegNum;
-	union {
-		uint32_t u4TxStatus[LIST_SEG_MAX];
-	} u;
-};
-
-extern struct list_mode_event g_HqaListModeStatus;
 
 /*******************************************************************************
  *                   F U N C T I O N   D E C L A R A T I O N S
@@ -441,6 +428,8 @@ int32_t connacSetICapStart(struct GLUE_INFO *prGlueInfo,
 			   uint32_t u4SourceAddrMSB, uint32_t u4Band);
 int32_t connacGetICapStatus(struct GLUE_INFO *prGlueInfo);
 
+int32_t commonGetICapIQData(struct GLUE_INFO *prGlueInfo,
+			uint8_t *pData, uint32_t u4IQType, uint32_t u4WFNum);
 int32_t connacGetICapIQData(struct GLUE_INFO *prGlueInfo,
 			uint8_t *pData, uint32_t u4IQType, uint32_t u4WFNum);
 

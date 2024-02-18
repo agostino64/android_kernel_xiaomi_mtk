@@ -93,10 +93,7 @@
 
 #define CFG_TX_STOP_NETIF_QUEUE_THRESHOLD   256	/* packets */
 
-#ifdef CONFIG_MTK_WIFI_HE160
-#define CFG_TX_STOP_NETIF_PER_QUEUE_THRESHOLD   4096	/* packets */
-#define CFG_TX_START_NETIF_PER_QUEUE_THRESHOLD  3072	/* packets */
-#elif (defined CONFIG_MTK_WIFI_HE80)
+#if (CFG_SUPPORT_CONNAC2X == 1)
 #define CFG_TX_STOP_NETIF_PER_QUEUE_THRESHOLD   1024	/* packets */
 #define CFG_TX_START_NETIF_PER_QUEUE_THRESHOLD  512	/* packets */
 #else
@@ -123,8 +120,6 @@
 /* for non-wfa vendor specific IE buffer */
 #define NON_WFA_VENDOR_IE_MAX_LEN	(128)
 
-#define FW_LOG_CMD_ON_OFF		0
-#define FW_LOG_CMD_SET_LEVEL		1
 
 /*******************************************************************************
  *                    E X T E R N A L   R E F E R E N C E S
@@ -275,11 +270,6 @@
 #include <linux/time.h>
 #include <linux/fb.h>
 
-#if CFG_SUPPORT_NAN
-#include "nan_base.h"
-#include "nan_intf.h"
-#endif
-
 #if (CONFIG_WLAN_SERVICE == 1)
 #include "agent.h"
 #endif
@@ -292,18 +282,12 @@ extern const struct ieee80211_iface_combination
 	*p_mtk_iface_combinations_p2p;
 extern const int32_t mtk_iface_combinations_p2p_num;
 extern uint8_t g_aucNvram[];
-extern uint8_t g_aucNvram_OnlyPreCal[];
 
 #ifdef CONFIG_MTK_CONNSYS_DEDICATED_LOG_PATH
 typedef void (*wifi_fwlog_event_func_cb)(int, int);
 /* adaptor ko */
 extern int  wifi_fwlog_onoff_status(void);
 extern void wifi_fwlog_event_func_register(wifi_fwlog_event_func_cb pfFwlog);
-#if (CFG_SUPPORT_ICS == 1)
-typedef void (*ics_fwlog_event_func_cb)(int, int);
-extern ssize_t wifi_ics_fwlog_write(char *buf, size_t count);
-extern void wifi_ics_event_func_register(ics_fwlog_event_func_cb pfFwlog);
-#endif /* CFG_SUPPORT_ICS */
 #endif
 #if CFG_MTK_ANDROID_WMT
 extern void update_driver_loaded_status(uint8_t loaded);
@@ -367,19 +351,6 @@ extern void update_driver_loaded_status(uint8_t loaded);
 #define GLUE_FLAG_RST_END_BIT 19
 
 #endif
-
-#if CFG_SUPPORT_NAN /* notice the bit differnet with 7668 */
-#define GLUE_FLAG_NAN_MULTICAST_BIT (20)
-#define GLUE_FLAG_NAN_MULTICAST BIT(20)
-#endif
-
-#if (CFG_SUPPORT_POWER_THROTTLING == 1)
-#define GLUE_FLAG_CNS_PWR_LEVEL_BIT		(21)
-#define GLUE_FLAG_CNS_PWR_TEMP_BIT		(22)
-#define GLUE_FLAG_CNS_PWR_LEVEL			BIT(21)
-#define GLUE_FLAG_CNS_PWR_TEMP			BIT(22)
-#endif
-
 #define GLUE_BOW_KFIFO_DEPTH        (1024)
 /* #define GLUE_BOW_DEVICE_NAME        "MT6620 802.11 AMP" */
 #define GLUE_BOW_DEVICE_NAME        "ampc0"
@@ -390,7 +361,6 @@ extern void update_driver_loaded_status(uint8_t loaded);
 #define STR_HELPER(x) #x
 #define STR(x) STR_HELPER(x)
 
-#define IW_AUTH_CIPHER_GCMP128  0x00000040
 #define IW_AUTH_CIPHER_GCMP256  0x00000080
 
 /*******************************************************************************
@@ -410,12 +380,9 @@ struct GL_WPA_INFO {
 	uint32_t u4Mfp;
 	uint8_t ucRSNMfpCap;
 #endif
-	uint16_t u2RSNXCap;
 };
 
 #if CFG_SUPPORT_REPLAY_DETECTION
-/* copy from privacy.h */
-#define MAX_KEY_NUM                             6
 struct GL_REPLEY_PN_INFO {
 	uint8_t auPN[16];
 	u_int8_t fgRekey;
@@ -424,7 +391,7 @@ struct GL_REPLEY_PN_INFO {
 struct GL_DETECT_REPLAY_INFO {
 	uint8_t ucCurKeyId;
 	uint8_t ucKeyType;
-	struct GL_REPLEY_PN_INFO arReplayPNInfo[MAX_KEY_NUM];
+	struct GL_REPLEY_PN_INFO arReplayPNInfo[4];
 };
 #endif
 
@@ -465,9 +432,6 @@ enum ENUM_PKT_FLAG {
 	ENUM_PKT_ICMP,		/* ICMP */
 	ENUM_PKT_TDLS,		/* TDLS */
 	ENUM_PKT_DNS,		/* DNS */
-#if CFG_SUPPORT_TPENHANCE_MODE
-	ENUM_PKT_TCP_ACK,
-#endif /* CFG_SUPPORT_TPENHANCE_MODE */
 
 	ENUM_PKT_FLAG_NUM
 };
@@ -729,9 +693,6 @@ struct GLUE_INFO {
 	struct delayed_work rRxPktDeAggWork;
 
 	struct timer_list tickfn;
-#if CFG_SUPPORT_TPENHANCE_MODE
-	struct timer_list PeriodSecTimer;
-#endif /* CFG_SUPPORT_TPENHANCE_MODE */
 
 #if CFG_SUPPORT_EXT_CONFIG
 	uint16_t au2ExtCfg[256];	/* NVRAM data buffer */
@@ -749,9 +710,6 @@ struct GLUE_INFO {
 	/* Wireless statistics struct net_device */
 	struct iw_statistics rP2pIwStats;
 #endif
-#endif
-#if CFG_SUPPORT_NAN
-	struct _GL_NAN_INFO_T *aprNANDevInfo[NAN_BSS_INDEX_NUM];
 #endif
 
 	/* NVRAM availability */
@@ -809,11 +767,8 @@ struct GLUE_INFO {
 #endif
 
 	int32_t i4RssiCache[BSSID_NUM];
-	uint32_t u4TxLinkSpeedCache[BSSID_NUM];
-	uint32_t u4RxLinkSpeedCache[BSSID_NUM];
-	uint32_t u4TxBwCache[BSSID_NUM];
-	uint32_t u4RxBwCache[BSSID_NUM];
-	uint32_t u4FcsErrorCache;
+	uint32_t u4LinkSpeedCache[BSSID_NUM];
+
 
 	uint32_t u4InfType;
 
@@ -865,19 +820,6 @@ struct GLUE_INFO {
 #if (CONFIG_WLAN_SERVICE == 1)
 	struct service rService;
 #endif
-
-#if CFG_SUPPORT_NAN
-	struct sock *NetLinkSK;
-#endif
-
-#if CFG_SUPPORT_TPENHANCE_MODE
-	/* Tp Enhance */
-	struct QUE rTpeAckQueue;
-	uint32_t u4TpeMaxPktNum;
-	uint64_t u8TpeTimestamp;
-	uint32_t u4TpeTimeout;
-	struct timer_list rTpeTimer;
-#endif /* CFG_SUPPORT_TPENHANCE_MODE */
 };
 
 typedef irqreturn_t(*PFN_WLANISR) (int irq, void *dev_id,
@@ -913,8 +855,6 @@ enum TestModeCmdType {
 	TESTMODE_CMD_ID_HS_CONFIG = 51,
 
 	TESTMODE_CMD_ID_STR_CMD = 102,
-
-	TESTMODE_CMD_ID_UPDATE_STA_PMKID = 1000,
 	NUM_OF_TESTMODE_CMD_ID
 };
 
@@ -934,10 +874,7 @@ struct NL80211_DRIVER_STRING_CMD_PARAMS {
 	struct NL80211_DRIVER_TEST_MODE_PARAMS hdr;
 	uint32_t reply_buf_size;
 	uint32_t reply_len;
-	union _reply_buf {
-		uint8_t *ptr;
-		uint64_t data;
-	} reply_buf;
+	uint8_t *reply_buf;
 };
 
 /*SW CMD */
@@ -999,12 +936,8 @@ struct NETDEV_PRIVATE_GLUE_INFO {
 	struct napi_struct napi;
 	OS_SYSTIME tmGROFlushTimeout;
 	spinlock_t napi_spinlock;
-	uint32_t u4PendingFlushNum;
 #endif
 	struct net_device_stats stats;
-#if CFG_SUPPORT_NAN
-	unsigned char ucIsNan;
-#endif
 };
 
 struct PACKET_PRIVATE_DATA {
@@ -1031,12 +964,6 @@ struct PACKET_PRIVATE_DATA {
 struct PACKET_PRIVATE_RX_DATA {
 	uint64_t u8IntTime;	/* 8byte */
 	uint64_t u8RxTime;	/* 8byte */
-};
-
-struct CMD_CONNSYS_FW_LOG {
-	int32_t fgCmd;
-	int32_t fgValue;
-	u_int8_t fgEarlySet;
 };
 
 /*******************************************************************************
@@ -1465,17 +1392,12 @@ void wlanUpdateChannelTable(struct GLUE_INFO *prGlueInfo);
 #if CFG_SUPPORT_SAP_DFS_CHANNEL
 void wlanUpdateDfsChannelTable(struct GLUE_INFO *prGlueInfo,
 		uint8_t ucRoleIdx, uint8_t ucChannel, uint8_t ucBandWidth,
-		enum ENUM_CHNL_EXT eBssSCO, uint32_t u4CenterFreq,
-		enum ENUM_BAND eBand);
+		enum ENUM_CHNL_EXT eBssSCO, uint32_t u4CenterFreq);
 #endif
 
 #if (CFG_MTK_ANDROID_WMT || WLAN_INCLUDE_PROC)
 int set_p2p_mode_handler(struct net_device *netdev,
 			 struct PARAM_CUSTOM_P2P_SET_STRUCT p2pmode);
-#endif
-
-#if CFG_SUPPORT_NAN
-int set_nan_handler(struct net_device *netdev, uint32_t ucEnable);
 #endif
 
 #if CFG_ENABLE_UNIFY_WIPHY
@@ -1505,25 +1427,8 @@ extern const uint8_t *kalFindIeMatchMask(uint8_t eid,
 				int match_len, int match_offset,
 				const uint8_t *match_mask);
 
-extern const uint8_t *kalFindIeExtIE(uint8_t eid,
-				uint8_t exteid,
-				const uint8_t *ies, int len);
-
-extern const uint8_t *kalFindVendorIe(uint32_t oui, int type,
-				const uint8_t *ies, int len);
 
 void wlanNvramSetState(enum ENUM_NVRAM_STATE state);
 enum ENUM_NVRAM_STATE wlanNvramGetState(void);
-
-#if (CFG_SUPPORT_POWER_THROTTLING == 1)
-int connsys_power_event_notification(enum conn_pwr_event_type type, void *data);
-#endif
-
-#ifdef CONFIG_MTK_CONNSYS_DEDICATED_LOG_PATH
-uint32_t getFWLogOnOff(void);
-uint32_t getFWLogLevel(void);
-uint32_t connsysFwLogControl(struct ADAPTER *prAdapter,
-	void *pvSetBuffer, uint32_t u4SetBufferLen, uint32_t *pu4SetInfoLen);
-#endif
 
 #endif /* _GL_OS_H */

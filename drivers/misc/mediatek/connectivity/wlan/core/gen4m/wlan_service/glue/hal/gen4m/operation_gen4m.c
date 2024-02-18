@@ -1044,7 +1044,7 @@ static void mt_op_set_manual_he_tb_value(
 	else
 		cmm.field.ltf_sym_midiam = ltf_sym_code[ru_sta->nss];
 	cmm.field.gi_ltf = configs->sgi;
-	cmm.field.ul_bw = tm_bw_hqa_mapping_at((u_int32) configs->bw);
+	cmm.field.ul_bw = configs->bw;
 	cmm.field.stbc = configs->stbc;
 
 	SERV_LOG(SERV_DBG_CAT_TEST, SERV_DBG_LVL_TRACE,
@@ -1080,7 +1080,7 @@ static void mt_op_set_manual_he_tb_value(
 	usr.field.allocation = ru_sta->ru_index;
 	usr.field.coding = ru_sta->ldpc;
 	usr.field.mcs = ru_sta->rate & ~BIT(5);
-	usr.field.dcm = (ru_sta->rate & BIT(5)) >> 5;
+	usr.field.dcm = (ru_sta->rate & BIT(5)) >> 4;
 	usr.field.ss_allocation =
 	((ru_sta->nss-1) << 3) | (ru_sta->start_sp_st & 0x7);
 
@@ -1384,9 +1384,6 @@ s_int32 mt_op_set_channel(
 		SetFreq = 1000 * (5000 + central_ch0 * 5);
 	} else if (central_ch0 == 6 && ch_band == 1) {
 		SetFreq = 1000 * 5032;
-	} else if ((central_ch0 >= 1 && central_ch0 <= 233) && ch_band == 2) {
-		/*ch_band: 2: 6G */
-		SetFreq = 1000 * (5950 + central_ch0 * 5);
 	} else {
 		SetFreq = tm_ch_num_to_freq((u_int32)central_ch0);
 	}
@@ -1725,6 +1722,7 @@ s_int32 mt_op_dbdc_continuous_tx(
 	u_char band_idx,
 	struct test_configuration *configs)
 {
+	s_int32 SetFreq = 0;
 	s_int32 ret = SERV_STATUS_SUCCESS;
 	wlan_oid_handler_t pr_oid_funcptr = winfos->oid_funcptr;
 	u_int32 tx_mode = configs->tx_mode;
@@ -1737,11 +1735,11 @@ s_int32 mt_op_dbdc_continuous_tx(
 		tm_rftest_set_auto_test(winfos,
 			RF_AT_FUNCID_SET_DBDC_BAND_IDX,
 			(u_int32)band_idx);
-#if 0
+
 		SetFreq = tm_ch_num_to_freq(configs->channel);
 		tm_rftest_set_auto_test(winfos,
 			RF_AT_FUNCID_CHNL_FREQ, SetFreq);
-#endif
+
 		tm_rftest_set_auto_test(winfos,
 			RF_AT_FUNCID_SET_PRIMARY_CH,
 			configs->pri_sel);
@@ -2920,7 +2918,10 @@ s_int32 mt_op_get_wf_path_comb(
 
 	if (dbdc_mode_en) {
 		*path_len = 1;
-		*path = 0;
+		if (band_idx == M_BAND_0)
+			*path = 0;
+		else
+			*path = 1;
 	} else {
 		*path_len = 2;
 		for (i = 0; i < *path_len; i++)
@@ -2932,27 +2933,3 @@ s_int32 mt_op_get_wf_path_comb(
 
 	return ret;
 }
-
-s_int32 mt_op_listmode_cmd(
-	struct test_wlan_info *winfos,
-	u_int8 *para,
-	u_int16 para_len,
-	uint32_t *rsp_len,
-	void *rsp_data)
-{
-	s_int32 ret = SERV_STATUS_SUCCESS;
-	wlan_oid_handler_t pr_oid_funcptr = winfos->oid_funcptr;
-
-	if (pr_oid_funcptr == NULL)
-		return SERV_STATUS_HAL_OP_INVALID_NULL_POINTER;
-
-	ret = pr_oid_funcptr(winfos, /*call back to ServiceWlanOid*/
-		OP_WLAN_OID_LIST_MODE,
-		(void *)para,
-		(u_int32)para_len,
-		rsp_len,
-		rsp_data);
-
-	return ret;
-}
-

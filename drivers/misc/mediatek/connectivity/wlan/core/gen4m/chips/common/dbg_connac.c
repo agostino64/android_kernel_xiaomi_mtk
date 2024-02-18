@@ -397,40 +397,6 @@ static struct EMPTY_QUEUE_INFO Queue_Empty_info[] = {
 	{"RLS2 Q",  ENUM_PLE_CTRL_PSE_PORT_3, ENUM_UMAC_PLE_CTRL_P3_Q_0X1F}
 };
 
-/* =============================================================================
- *                         Debug Interrupt Interface v1
- * +---------------------------------------------------------------------------+
- * |Toggle|Rsv[30:28]|Ver[27:24]|Rsv[23:18]|BSSInx[17:14]|Mod[13:8]|Reason[7:0]|
- * +---------------------------------------------------------------------------+
- * =============================================================================
- */
-uint32_t halGetPleInt(struct ADAPTER *prAdapter)
-{
-	uint32_t u4Val = 0;
-
-	HAL_MCR_RD(prAdapter, PLE_TO_N9_INT, &u4Val);
-
-	return u4Val;
-}
-
-void halSetPleInt(struct ADAPTER *prAdapter, bool fgTrigger,
-		  uint32_t u4ClrMask, uint32_t u4SetMask)
-{
-	uint32_t u4Val = 0;
-
-	HAL_MCR_RD(prAdapter, PLE_TO_N9_INT, &u4Val);
-
-	if (fgTrigger) {
-		u4Val = (~u4Val & PLE_TO_N9_INT_TOGGLE_MASK) |
-			(u4Val & ~PLE_TO_N9_INT_TOGGLE_MASK);
-	}
-
-	u4Val &= ~u4ClrMask;
-	u4Val |= u4SetMask;
-
-	HAL_MCR_WR(prAdapter, PLE_TO_N9_INT, u4Val);
-}
-
 void halShowPleInfo(IN struct ADAPTER *prAdapter,
 	u_int8_t fgDumpTxd)
 {
@@ -1207,7 +1173,7 @@ static char *q_idx_lmac_str[] = {"WMM0_AC0", "WMM0_AC1", "WMM0_AC2", "WMM0_AC3",
 	"Band1_ALTX", "Band1_BMC", "Band1_BNC", "Band1_PSMP",
 	"Invalid"};
 
-void halDumpTxdInfo(IN struct ADAPTER *prAdapter, uint8_t *tmac_info)
+void halDumpTxdInfo(IN struct ADAPTER *prAdapter, uint32_t *tmac_info)
 {
 	struct TMAC_TXD_S *txd_s;
 	struct TMAC_TXD_0 *txd_0;
@@ -1965,7 +1931,7 @@ int32_t halShowStatInfo(struct ADAPTER *prAdapter,
 			pcCommand + i4BytesWritten,
 			i4TotalLen - i4BytesWritten,
 			"%s%s%s", "------ ",
-			(eRangeType != 0) ? (
+			(eRangeType) ? (
 				(eRangeType == ENUM_AGG_RANGE_TYPE_TRX) ?
 				("TRX") : ("RX")) : ("TX"),
 				" AGG (Group 0x40) -----\n");
@@ -2144,76 +2110,3 @@ int32_t halShowStatInfo(struct ADAPTER *prAdapter,
 
 	return i4BytesWritten;
 }
-
-#ifdef CFG_SUPPORT_LINK_QUALITY_MONITOR
-int connac_get_rx_rate_info(IN struct ADAPTER *prAdapter,
-		OUT uint32_t *pu4Rate, OUT uint32_t *pu4Nss,
-		OUT uint32_t *pu4RxMode, OUT uint32_t *pu4FrMode,
-		OUT uint32_t *pu4Sgi)
-{
-	struct STA_RECORD *prStaRec;
-	uint32_t rxmode = 0, rate = 0, frmode = 0, sgi = 0, nsts = 0;
-	uint32_t groupid = 0, stbc = 0, nss = 0;
-	uint32_t u4RxVector0 = 0, u4RxVector1 = 0;
-	uint8_t ucWlanIdx, ucStaIdx;
-
-	if ((!pu4Rate) || (!pu4Nss) || (!pu4RxMode) || (!pu4FrMode) ||
-		(!pu4Sgi))
-		return -1;
-
-	prStaRec = aisGetStaRecOfAP(prAdapter, AIS_DEFAULT_INDEX);
-	if (prStaRec) {
-		ucWlanIdx = prStaRec->ucWlanIndex;
-	} else {
-		DBGLOG(SW4, ERROR, "prStaRecOfAP is null\n");
-		return -1;
-	}
-
-	if (wlanGetStaIdxByWlanIdx(prAdapter, ucWlanIdx, &ucStaIdx) ==
-		WLAN_STATUS_SUCCESS) {
-		u4RxVector0 = prAdapter->arStaRec[ucStaIdx].u4RxVector0;
-		u4RxVector1 = prAdapter->arStaRec[ucStaIdx].u4RxVector1;
-		if ((u4RxVector0 == 0) || (u4RxVector1 == 0)) {
-			DBGLOG(SW4, WARN, "RxVector1 or RxVector2 is 0\n");
-			return -1;
-		}
-	} else {
-		DBGLOG(SW4, ERROR, "wlanGetStaIdxByWlanIdx fail\n");
-		return -1;
-	}
-
-	rate = (u4RxVector0 & RX_VT_RX_RATE_MASK) >> RX_VT_RX_RATE_OFFSET;
-	nsts = ((u4RxVector1 & RX_VT_NSTS_MASK) >> RX_VT_NSTS_OFFSET);
-	stbc = ((u4RxVector0 & RX_VT_STBC_MASK) >> RX_VT_STBC_OFFSET);
-	rxmode = (u4RxVector0 & RX_VT_RX_MODE_MASK) >> RX_VT_RX_MODE_OFFSET;
-	frmode = (u4RxVector0 & RX_VT_FR_MODE_MASK) >> RX_VT_FR_MODE_OFFSET;
-	sgi = u4RxVector0 & RX_VT_SHORT_GI;
-	groupid = (u4RxVector1 & RX_VT_GROUP_ID_MASK) >> RX_VT_GROUP_ID_OFFSET;
-
-	if ((groupid == 0) || (groupid == 63))
-		nsts += 1;
-
-	nss = stbc ? (nsts >> 1) : nsts;
-
-	sgi = (sgi == 0) ? 0 : 1;
-
-	if (frmode >= 4) {
-		DBGLOG(SW4, ERROR, "frmode error: %u\n", frmode);
-		return -1;
-	}
-
-	*pu4Rate = rate;
-	*pu4Nss = nss;
-	*pu4RxMode = rxmode;
-	*pu4FrMode = frmode;
-	*pu4Sgi = sgi;
-
-	DBGLOG(SW4, TRACE,
-		   "rxmode=[%u], rate=[%u], bw=[%u], sgi=[%u], nss=[%u]\n",
-		   rxmode, rate, frmode, sgi, nss
-	);
-
-	return 0;
-}
-#endif
-

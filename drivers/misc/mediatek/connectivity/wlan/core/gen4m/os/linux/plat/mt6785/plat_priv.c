@@ -17,7 +17,7 @@
 
 #include "precomp.h"
 
-#ifdef CONFIG_WLAN_MTK_EMI
+#ifdef CONFIG_MTK_EMI
 #include <mt_emi_api.h>
 #define WIFI_EMI_MEM_OFFSET    0x140000
 #define WIFI_EMI_MEM_SIZE      0x130000
@@ -75,7 +75,7 @@ int32_t kalBoostCpu(IN struct ADAPTER *prAdapter,
 	return 0;
 }
 
-#ifdef CONFIG_WLAN_MTK_EMI
+#ifdef CONFIG_MTK_EMI
 void kalSetEmiMpuProtection(phys_addr_t emiPhyBase, bool enable)
 {
 }
@@ -101,7 +101,7 @@ void kalSetDrvEmiMpuProtection(phys_addr_t emiPhyBase, uint32_t offset,
 }
 #endif
 
-int32_t kalGetFwFlavorByPlat(uint8_t *flavor)
+int32_t kalGetFwFlavor(uint8_t *flavor)
 {
 	*flavor = 'a';
 	return 1;

@@ -96,7 +96,6 @@ extern KAL_WAKE_LOCK_T *g_IntrWakeLock;
  *******************************************************************************
  */
 #define AXI_CFG_PREALLOC_MEMORY_BUFFER    1
-#define AXI_ISR_DEBUG_LOG    0
 
 #define AXI_TX_MAX_SIZE_PER_FRAME         (NIC_TX_MAX_SIZE_PER_FRAME +      \
 					   NIC_TX_DESC_AND_PADDING_LENGTH)
@@ -105,7 +104,7 @@ extern KAL_WAKE_LOCK_T *g_IntrWakeLock;
 #define AXI_WLAN_IRQ_NUMBER               16
 
 #if (CFG_SUPPORT_CONNINFRA == 1)
-#define WIFI_EMI_WFDMA_OFFSET      0x450000
+#define WIFI_EMI_WFDMA_OFFSET      0xa50000
 #define WIFI_EMI_WFDMA_SIZE        0xF20000
 #endif
 
@@ -199,7 +198,6 @@ struct GL_HIF_INFO {
 	u_int8_t fgMbxReadClear;
 
 	uint32_t u4IntStatus;
-	unsigned long ulIntFlag;
 
 	struct MSDU_TOKEN_INFO rTokenInfo;
 
@@ -207,8 +205,8 @@ struct GL_HIF_INFO {
 	struct timer_list rSerTimer;
 	u_int64_t rSerTimerData;
 	struct list_head rTxCmdQ;
-	struct list_head rTxDataQ[NUM_OF_TX_RING];
-	uint32_t u4TxDataQLen[NUM_OF_TX_RING];
+	struct list_head rTxDataQ;
+	uint32_t u4TxDataQLen;
 
 	bool fgIsPowerOff;
 	bool fgIsDumpLog;
@@ -225,7 +223,6 @@ struct BUS_INFO {
 	const uint32_t tx_ring_fwdl_idx;
 	const uint32_t tx_ring0_data_idx;
 	const uint32_t tx_ring1_data_idx;
-	const uint32_t tx_ring2_data_idx;
 	const uint32_t max_static_map_addr;
 	const uint32_t fw_own_clear_addr;
 	const uint32_t fw_own_clear_bit;
@@ -277,21 +274,14 @@ struct BUS_INFO {
 #endif /* CFG_SUPPORT_CONNAC2X == 1 */
 
 	const uint32_t ap2wf_remap_1;
-	struct wfdma_group_info *wfmda_host_tx_group;
+	const struct wfdma_group_info *wfmda_host_tx_group;
 	const uint32_t wfmda_host_tx_group_len;
-	struct wfdma_group_info *wfmda_host_rx_group;
+	const struct wfdma_group_info *wfmda_host_rx_group;
 	const uint32_t wfmda_host_rx_group_len;
-	struct wfdma_group_info *wfmda_wm_tx_group;
+	const struct wfdma_group_info *wfmda_wm_tx_group;
 	const uint32_t wfmda_wm_tx_group_len;
-	struct wfdma_group_info *wfmda_wm_rx_group;
+	const struct wfdma_group_info *wfmda_wm_rx_group;
 	const uint32_t wfmda_wm_rx_group_len;
-
-	struct DMASHDL_CFG *prDmashdlCfg;
-	struct PLE_TOP_CR *prPleTopCr;
-	struct PSE_TOP_CR *prPseTopCr;
-	struct PP_TOP_CR *prPpTopCr;
-	struct pse_group_info *prPseGroup;
-	const uint32_t u4PseGroupLen;
 
 	void (*pdmaSetup)(struct GLUE_INFO *prGlueInfo, u_int8_t enable,
 		bool fgResetHif);
@@ -299,10 +289,8 @@ struct BUS_INFO {
 		uint16_t u2Port, uint32_t u4MaxQuota);
 	void (*enableInterrupt)(struct ADAPTER *prAdapter);
 	void (*disableInterrupt)(struct ADAPTER *prAdapter);
-	void (*disableSwInterrupt)(struct ADAPTER *prAdapter);
 	void (*processTxInterrupt)(struct ADAPTER *prAdapter);
 	void (*processRxInterrupt)(struct ADAPTER *prAdapter);
-	void (*processAbnormalInterrupt)(struct ADAPTER *prAdapter);
 	void (*lowPowerOwnRead)(struct ADAPTER *prAdapter, u_int8_t *pfgResult);
 	void (*lowPowerOwnSet)(struct ADAPTER *prAdapter, u_int8_t *pfgResult);
 	void (*lowPowerOwnClear)(struct ADAPTER *prAdapter,
@@ -350,18 +338,19 @@ struct HIF_PREALLOC_MEM {
 	struct HIF_MEM rTxCmdBuf[TX_RING_SIZE];
 	/* Rx Data */
 	struct HIF_MEM rRxDataBuf[RX_RING0_SIZE];
-	/* Rx Event */
-	struct HIF_MEM rRxEventBuf[RX_RING1_SIZE];
 
 #if (CFG_SUPPORT_CONNAC2X == 1)
 	/* Connac1.0 = RX Event, Connac2.0 = Rx Data band1 */
-	struct HIF_MEM rRxData1Buf[RX_RING0_SIZE];
+	struct HIF_MEM rRxEventBuf[RX_RING0_SIZE];
 	/* Band 0 TxFreeDoneEvent */
-	struct HIF_MEM rTxFreeDoneEvent0Buf[RX_RING1_SIZE];
+	struct HIF_MEM wfdma0_rx_ring_idx2[RX_RING1_SIZE];
 	/* Band 1 TxFreeDoneEvent */
-	struct HIF_MEM rTxFreeDoneEvent1Buf[RX_RING1_SIZE];
+	struct HIF_MEM wfdma0_rx_ring_idx3[RX_RING1_SIZE];
+	/* WM Event */
+	struct HIF_MEM wfdma1_rx_ring_idx0[RX_RING1_SIZE];
 #else
 	/* Connac1.0 = RX Event, Connac2.0 = Rx Data band1 */
+	struct HIF_MEM rRxEventBuf[RX_RING1_SIZE];
 #endif /* CFG_SUPPORT_CONNAC2X == 1 */
 
 #if HIF_TX_PREALLOC_DATA_BUFFER
@@ -428,10 +417,6 @@ void glSetPowerState(IN struct GLUE_INFO *prGlueInfo, IN uint32_t ePowerMode);
 void glGetDev(void *ctx, struct device **dev);
 
 void glGetHifDev(struct GL_HIF_INFO *prHif, struct device **dev);
-
-struct mt66xx_hif_driver_data *get_platform_driver_data(void);
-
-void glGetChipInfo(void **prChipInfo);
 
 /*******************************************************************************
  *                              F U N C T I O N S

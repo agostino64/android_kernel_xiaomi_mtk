@@ -87,7 +87,9 @@
 #include "precomp.h"
 #include "gl_vendor.h"
 #include "gl_cfg80211.h"
+#if CFG_MTK_MCIF_WIFI_SUPPORT
 #include "mddp.h"
+#endif
 /******************************************************************************
  *                              C O N S T A N T S
  ******************************************************************************
@@ -120,7 +122,7 @@
  */
 
 struct net_device *g_P2pPrDev;
-struct wireless_dev *gprP2pWdev[KAL_P2P_NUM];
+struct wireless_dev *gprP2pWdev;
 struct wireless_dev *gprP2pRoleWdev[KAL_P2P_NUM];
 struct net_device *gPrP2pDev[KAL_P2P_NUM];
 uint32_t g_u4DevIdx[KAL_P2P_NUM];
@@ -219,17 +221,6 @@ static const struct wiphy_vendor_command mtk_p2p_vendor_ops[] = {
 				| WIPHY_VENDOR_CMD_NEED_NETDEV
 				| WIPHY_VENDOR_CMD_NEED_RUNNING,
 		.doit = mtk_cfg80211_vendor_acs
-	},
-#endif
-#if CFG_SUPPORT_DFS_MASTER
-	{
-		{
-			.vendor_id = OUI_QCA,
-			.subcmd = NL80211_VENDOR_SUBCMD_DFS_CAPABILITY
-		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV
-				| WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = mtk_cfg80211_vendor_dfs_capability
 	},
 #endif
 	{
@@ -1170,11 +1161,6 @@ int glSetupP2P(struct GLUE_INFO *prGlueInfo, struct wireless_dev *prP2pWdev,
 
 #endif /* CFG_ENABLE_WIFI_DIRECT_CFG_80211 */
 
-#if (CFG_SUPPORT_WIFI_6G == 1)
-	if (!prAdapter->fgIsHwSupport6G)
-		prP2pWdev->wiphy->bands[BAND_6G] = NULL;
-#endif
-
 	/* setup netdev */
 	/* Point to shared glue structure */
 	prNetDevPriv = (struct NETDEV_PRIVATE_GLUE_INFO *)
@@ -1187,7 +1173,7 @@ int glSetupP2P(struct GLUE_INFO *prGlueInfo, struct wireless_dev *prP2pWdev,
 #if CFG_ENABLE_UNIFY_WIPHY
 		prNetDevPriv->ucIsP2p = FALSE;
 #endif
-#if CFG_MTK_MDDP_SUPPORT
+#if CFG_MTK_MDDP_WH_SUPPORT
 		prNetDevPriv->ucMddpSupport = TRUE;
 #else
 		prNetDevPriv->ucMddpSupport = FALSE;
@@ -1291,8 +1277,7 @@ u_int8_t glRegisterP2P(struct GLUE_INFO *prGlueInfo, const char *prDevName,
 	ASSERT(prAdapter);
 
 	if ((ucApMode == RUNNING_DUAL_AP_MODE) ||
-	    (ucApMode == RUNNING_P2P_AP_MODE) ||
-	    (ucApMode == RUNNING_DUAL_P2P_MODE)) {
+	    (ucApMode == RUNNING_P2P_AP_MODE)) {
 		ucRegisterNum = 2;
 		glP2pCreateWirelessDevice(prGlueInfo);
 	}
@@ -1310,12 +1295,10 @@ u_int8_t glRegisterP2P(struct GLUE_INFO *prGlueInfo, const char *prDevName,
 			/* RUNNING_AP_MODE
 			 * RUNNING_DUAL_AP_MODE
 			 * RUNNING_P2P_MODE
-			 * RUNNING_DUAL_P2P_MODE
 			 */
 			prSetDevName = prDevName;
 
-			if (ucApMode == RUNNING_P2P_MODE ||
-				ucApMode == RUNNING_DUAL_P2P_MODE)
+			if (ucApMode == RUNNING_P2P_MODE)
 				fgIsApMode = FALSE;
 			else
 				fgIsApMode = TRUE;
@@ -1431,9 +1414,6 @@ u_int8_t glP2pCreateWirelessDevice(struct GLUE_INFO *prGlueInfo)
 	DBGLOG(INIT, TRACE, "glP2pCreateWirelessDevice (%p)\n",
 			gprP2pRoleWdev[i]->wiphy);
 
-	/* P2PDev and P2PRole[0] share the same Wdev */
-	gprP2pWdev[i] = gprP2pRoleWdev[i];
-
 	return TRUE;
 #else
 	return FALSE;
@@ -1471,10 +1451,6 @@ u_int8_t glP2pCreateWirelessDevice(struct GLUE_INFO *prGlueInfo)
 
 	prWiphy->bands[KAL_BAND_2GHZ] = &mtk_band_2ghz;
 	prWiphy->bands[KAL_BAND_5GHZ] = &mtk_band_5ghz;
-#if (CFG_SUPPORT_WIFI_6G == 1)
-	prWiphy->bands[KAL_BAND_6GHZ] = &mtk_band_6ghz;
-	DBGLOG(INIT, INFO, "P2P support 6G\n");
-#endif
 
 	prWiphy->mgmt_stypes = mtk_cfg80211_default_mgmt_stypes;
 	prWiphy->max_remain_on_channel_duration = 5000;
@@ -1770,7 +1746,7 @@ static int p2pStop(IN struct net_device *prDev)
 
 	/* XXX: The p2pStop may be triggered after the wlanRemove.	*/
 	/*      And prGlueInfo->prP2PDevInfo is freed in p2PFreeInfo.	*/
-	if (!prAdapter || !prAdapter->fgIsP2PRegistered)
+	if (!prAdapter->fgIsP2PRegistered)
 		return -EFAULT;
 
 	prP2pGlueDevInfo = prGlueInfo->prP2PDevInfo;
@@ -1854,7 +1830,7 @@ struct net_device_stats *p2pGetStats(IN struct net_device *prDev)
 			netdev_priv(prDev);
 	kalMemCopy(&prNetDevPrivate->stats, &prDev->stats,
 			sizeof(struct net_device_stats));
-#if CFG_MTK_MDDP_SUPPORT
+#if CFG_MTK_MDDP_WH_SUPPORT
 	mddpGetMdStats(prDev);
 #endif
 
@@ -1898,14 +1874,7 @@ void mtk_p2p_wext_set_Multicastlist(struct GLUE_INFO *prGlueInfo)
 {
 	uint32_t u4SetInfoLen = 0;
 	uint32_t u4McCount;
-	struct net_device *prDev = NULL;
-
-	GLUE_SPIN_LOCK_DECLARATION();
-	GLUE_ACQUIRE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
-
-	prDev = g_P2pPrDev;
-
-	GLUE_RELEASE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
+	struct net_device *prDev = g_P2pPrDev;
 
 	prGlueInfo = (prDev != NULL)
 		? *((struct GLUE_INFO **) netdev_priv(prDev))
@@ -2224,32 +2193,22 @@ int p2pSetMACAddress(IN struct net_device *prDev, void *addr)
 		return -EINVAL;
 	}
 
-	sa = (struct sockaddr *)addr;
-
 	if (mtk_Netdev_To_RoleIdx(prGlueInfo, prDev, &ucRoleIdx) != 0) {
 		DBGLOG(INIT, ERROR, "can't find the matched dev");
-		goto skip_role;
+		return -EINVAL;
 	}
 
 	if (p2pFuncRoleToBssIdx(prGlueInfo->prAdapter,
 		ucRoleIdx, &ucBssIdx) != WLAN_STATUS_SUCCESS) {
 		DBGLOG(INIT, ERROR, "can't find the matched bss");
-		goto skip_role;
+		return -EINVAL;
 	}
 
 	prBssInfo = GET_BSS_INFO_BY_INDEX(prAdapter, ucBssIdx);
 	if (!prBssInfo) {
 		DBGLOG(INIT, ERROR, "bss is not active\n");
-		goto skip_role;
-	} else {
-		COPY_MAC_ADDR(prBssInfo->aucOwnMacAddr,
-			sa->sa_data);
-		COPY_MAC_ADDR(
-			prAdapter->rWifiVar.aucInterfaceAddress[ucRoleIdx],
-			sa->sa_data);
+		return -EINVAL;
 	}
-
-skip_role:
 
 	prDevBssInfo = GET_BSS_INFO_BY_INDEX(prAdapter,
 		prAdapter->ucP2PDevBssIdx);
@@ -2264,7 +2223,12 @@ skip_role:
 		return -EINVAL;
 	}
 
+	sa = (struct sockaddr *)addr;
+
+	COPY_MAC_ADDR(prBssInfo->aucOwnMacAddr, sa->sa_data);
 	COPY_MAC_ADDR(prDev->dev_addr, sa->sa_data);
+	COPY_MAC_ADDR(prAdapter->rWifiVar.aucInterfaceAddress[ucRoleIdx],
+			sa->sa_data);
 
 	if ((prP2pInfo->prDevHandler == prDev)
 		&& mtk_IsP2PNetDevice(prGlueInfo, prDev)) {
@@ -2276,7 +2240,7 @@ skip_role:
 			ucBssIdx,
 			prDevBssInfo->ucBssIndex,
 			MAC2STR(prDevBssInfo->aucOwnMacAddr));
-	} else if (prBssInfo) {
+	} else {
 		DBGLOG(INIT, INFO,
 			"[%d] Set random macaddr to " MACSTR ".\n",
 			ucBssIdx,

@@ -89,7 +89,6 @@
  *                           P R I V A T E   D A T A
  *******************************************************************************
  */
-static bool gDoTimeOut = FALSE;
 
 /*******************************************************************************
  *                                 M A C R O S
@@ -120,7 +119,6 @@ static u_int8_t cnmTimerIsTimerValid(IN struct ADAPTER *prAdapter,
  *
  */
 /*----------------------------------------------------------------------------*/
-#if 0
 static void cnmTimerDumpTimer(IN struct ADAPTER *prAdapter)
 {
 	struct ROOT_TIMER *prRootTimer;
@@ -140,13 +138,13 @@ static void cnmTimerDumpTimer(IN struct ADAPTER *prAdapter)
 		prTimerEntry = LINK_ENTRY(prLinkEntry,
 			struct TIMER, rLinkEntry);
 
-		log_dbg(CNM, INFO, "timer:%p, func:%ps, ExpiredSysTime:%u\n",
+		log_dbg(CNM, INFO, "timer:%p, func:%pf, ExpiredSysTime:%u\n",
 			prTimerEntry,
 			prTimerEntry->pfMgmtTimeOutFunc,
 			prTimerEntry->rExpiredSysTime);
 	}
 }
-#endif
+
 /*----------------------------------------------------------------------------*/
 /*!
  * \brief This routine is called to check if a timer exists in timer list.
@@ -184,7 +182,7 @@ static u_int8_t cnmTimerIsTimerValid(IN struct ADAPTER *prAdapter,
 			return TRUE;
 	}
 
-	log_dbg(CNM, WARN, "invalid pending timer %p func %ps\n",
+	log_dbg(CNM, WARN, "invalid pending timer %p func %pf\n",
 			prTimer, prTimer->pfMgmtTimeOutFunc);
 	return FALSE;
 }
@@ -330,6 +328,11 @@ cnmTimerInitTimerOption(IN struct ADAPTER *prAdapter,
 {
 	struct LINK *prTimerList;
 	struct LINK_ENTRY *prLinkEntry;
+	struct LINK_ENTRY *prTempLinkEntry;
+	/* Previous valid timer before the dangling timer */
+	struct LINK_ENTRY *prPrevLinkEntry = NULL;
+	/* Next valid timer after the dangling timer */
+	struct LINK_ENTRY *prNextLinkEntry = NULL;
 	struct TIMER *prPendingTimer;
 
 	KAL_SPIN_LOCK_DECLARATION();
@@ -352,7 +355,7 @@ cnmTimerInitTimerOption(IN struct ADAPTER *prAdapter,
 			struct TIMER, rLinkEntry);
 
 		if (prPendingTimer == prTimer) {
-			log_dbg(CNM, WARN, "re-init timer, timer %p func %ps\n",
+			log_dbg(CNM, WARN, "re-init timer, timer %p func %pf\n",
 				prTimer, pfFunc);
 
 			if (timerPendingTimer(prTimer)) {
@@ -361,9 +364,53 @@ cnmTimerInitTimerOption(IN struct ADAPTER *prAdapter,
 				 */
 				cnmTimerStopTimer_impl(prAdapter,
 					prTimer, FALSE);
+				continue;
 			}
-			break;
+
+			/* Timer structure was collapsed. Try to fix it. */
+			log_dbg(CNM, WARN, "timer was collapsed. fix it!\n");
+			LINK_FOR_EACH_PREV(prTempLinkEntry, prTimerList) {
+				if (prTempLinkEntry == NULL)
+					break;
+
+				prPendingTimer = LINK_ENTRY(
+					prTempLinkEntry,
+					struct TIMER, rLinkEntry);
+
+				if (prPendingTimer == prTimer) {
+					if (prNextLinkEntry == NULL) {
+						/* Link to head */
+						prNextLinkEntry =
+							(struct LINK_ENTRY *)
+							prTimerList;
+					}
+
+					/* Link to head */
+					if (prPrevLinkEntry == NULL) {
+						prTimerList->prNext =
+							prNextLinkEntry;
+						prNextLinkEntry->prPrev =
+							(struct LINK_ENTRY *)
+							prTimerList;
+						prTimerList->u4NumElem--;
+					} else { /* Link to previous entry */
+						prPrevLinkEntry->prNext =
+							prNextLinkEntry;
+						prNextLinkEntry->prPrev =
+							prPrevLinkEntry;
+						prTimerList->u4NumElem--;
+					}
+
+					/* Dump timer */
+					cnmTimerDumpTimer(prAdapter);
+					break;
+				}
+				/* Record next pending timer entry */
+				prNextLinkEntry = prTempLinkEntry;
+			}
 		}
+		/* Record previous pending timer entry */
+		prPrevLinkEntry = prLinkEntry;
 	}
 
 	LINK_ENTRY_INITIALIZE(&prTimer->rLinkEntry);
@@ -437,7 +484,7 @@ void cnmTimerStopTimer(IN struct ADAPTER *prAdapter, IN struct TIMER *prTimer)
 	ASSERT(prAdapter);
 	ASSERT(prTimer);
 
-	log_dbg(CNM, TRACE, "stop timer, timer %p func %ps\n",
+	log_dbg(CNM, TRACE, "stop timer, timer %p func %pf\n",
 		prTimer, prTimer->pfMgmtTimeOutFunc);
 
 	cnmTimerStopTimer_impl(prAdapter, prTimer, TRUE);
@@ -466,7 +513,7 @@ void cnmTimerStartTimer(IN struct ADAPTER *prAdapter, IN struct TIMER *prTimer,
 	ASSERT(prAdapter);
 	ASSERT(prTimer);
 
-	log_dbg(CNM, TRACE, "start timer, timer %p func %ps %d ms\n",
+	log_dbg(CNM, TRACE, "start timer, timer %p func %pf %d ms\n",
 		prTimer, prTimer->pfMgmtTimeOutFunc, u4TimeoutMs);
 
 #if (CFG_SUPPORT_STATISTICS == 1)
@@ -476,7 +523,7 @@ void cnmTimerStartTimer(IN struct ADAPTER *prAdapter, IN struct TIMER *prTimer,
 	if ((prTimer != NULL) && (&(prAdapter->rOidTimeoutTimer) != prTimer)
 		&& (wlan_fb_power_down == TRUE)) {
 		DBGLOG_LIMITED(CNM, INFO,
-			"[WLAN-LP] Start timer %p %u ms -handler(%ps)\n",
+			"[WLAN-LP] Start timer %p %u ms -handler(%pf)\n",
 			prTimer,
 			u4TimeoutMs,
 			prTimer->pfMgmtTimeOutFunc);
@@ -487,14 +534,6 @@ void cnmTimerStartTimer(IN struct ADAPTER *prAdapter, IN struct TIMER *prTimer,
 
 	prRootTimer = &prAdapter->rRootTimer;
 	prTimerList = &prRootTimer->rLinkHead;
-
-	if (gDoTimeOut) {
-		/* monitor the timer start in callback */
-		log_dbg(CNM, INFO,
-			"In DoTimeOut, timer %p func %ps %d ms timercount %d\n",
-			prTimer, prTimer->pfMgmtTimeOutFunc,
-			u4TimeoutMs, prTimerList->u4NumElem);
-	}
 
 	/* If timeout interval is larger than 1 minute, the mod value is set
 	 * to the timeout value first, then per minutue.
@@ -594,9 +633,6 @@ void cnmTimerDoTimeOutCheck(IN struct ADAPTER *prAdapter)
 	prRootTimer->rNextExpiredSysTime
 		= rCurSysTime + MGMT_MAX_TIMEOUT_INTERVAL;
 
-	log_dbg(CNM, INFO, "loop start [%d]\n", prTimerList->u4NumElem);
-	gDoTimeOut = TRUE;
-
 	LINK_FOR_EACH(prLinkEntry, prTimerList) {
 		if (prLinkEntry == NULL)
 			break;
@@ -623,12 +659,11 @@ void cnmTimerDoTimeOutCheck(IN struct ADAPTER *prAdapter)
 					KAL_RELEASE_SPIN_LOCK(prAdapter,
 						SPIN_LOCK_TIMER);
 				#ifdef UT_TEST_MODE
-				if (testTimerTimeout(prAdapter,
-						     pfMgmtTimeOutFunc,
-						     ulTimeoutDataPtr))
+					if (testTimerTimeout(prAdapter,
+							     pfMgmtTimeOutFunc,
+							     ulTimeoutDataPtr))
 				#endif
-				log_dbg(CNM, INFO,
-					"timer timeout, timer %p func %ps\n",
+				log_dbg(CNM, TRACE, "timer timeout, timer %p func %pf\n",
 					prTimer, prTimer->pfMgmtTimeOutFunc);
 
 					(pfMgmtTimeOutFunc) (prAdapter,
@@ -637,8 +672,7 @@ void cnmTimerDoTimeOutCheck(IN struct ADAPTER *prAdapter)
 						SPIN_LOCK_TIMER);
 				}
 			} else {
-				log_dbg(CNM, WARN,
-					"timer re-inited, timer %p func %ps\n",
+				log_dbg(CNM, WARN, "timer was re-inited, timer %p func %pf\n",
 					prTimer, prTimer->pfMgmtTimeOutFunc);
 				break;
 			}
@@ -665,9 +699,6 @@ void cnmTimerDoTimeOutCheck(IN struct ADAPTER *prAdapter)
 				eType = TIMER_WAKELOCK_AUTO;
 		}
 	}	/* end of for loop */
-
-	log_dbg(CNM, INFO, "loop end");
-	gDoTimeOut = false;
 
 	/* Setup the prNext timeout event. It is possible the timer was already
 	 * set in the above timeout callback function.

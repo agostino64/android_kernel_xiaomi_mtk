@@ -287,12 +287,6 @@ struct patch_dl_target {
 
 #endif
 
-enum ENUM_WLAN_POWER_ON_DOWNLOAD {
-	ENUM_WLAN_POWER_ON_DOWNLOAD_EMI = 0,
-	ENUM_WLAN_POWER_ON_DOWNLOAD_ROM_PATCH = 1,
-	ENUM_WLAN_POWER_ON_DOWNLOAD_WIFI_RAM_CODE = 2
-};
-
 /*******************************************************************************
  *                  F U N C T I O N   D E C L A R A T I O N S
  *******************************************************************************
@@ -417,7 +411,7 @@ void fwDlGetReleaseManifest(struct ADAPTER *prAdapter,
 #endif
 
 #if (CFG_SUPPORT_CONNINFRA == 1)
-extern void conninfra_get_phy_addr(phys_addr_t *addr, unsigned int *size);
+extern void conninfra_get_phy_addr(unsigned int *addr, unsigned int *size);
 #endif
 
 #endif /* _FW_DL_H */

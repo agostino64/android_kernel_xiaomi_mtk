@@ -348,18 +348,18 @@ uint32_t wlanDownloadSection(IN struct ADAPTER *prAdapter,
 	struct BUS_INFO *prBusInfo = NULL;
 #endif
 
+#if defined(_HIF_PCIE) || defined(_HIF_AXI)
+	prBusInfo = prAdapter->chip_info->bus_info;
+	if (prBusInfo->enableFwDlMode)
+		prBusInfo->enableFwDlMode(prAdapter);
+#endif
+
 	if (wlanImageSectionConfig(prAdapter, u4Addr, u4Len,
 				   u4DataMode, eDlIdx) != WLAN_STATUS_SUCCESS) {
 		DBGLOG(INIT, ERROR,
 		       "Firmware download configuration failed!\n");
 		return WLAN_STATUS_FAILURE;
 	}
-
-#if defined(_HIF_PCIE) || defined(_HIF_AXI)
-	prBusInfo = prAdapter->chip_info->bus_info;
-	if (prBusInfo->enableFwDlMode)
-		prBusInfo->enableFwDlMode(prAdapter);
-#endif
 
 	for (u4Offset = 0; u4Offset < u4Len;
 	     u4Offset += CMD_PKT_SIZE_FOR_IMAGE) {
@@ -461,7 +461,8 @@ uint32_t wlanDownloadEMISection(IN struct ADAPTER
 
 	request_mem_region(gConEmiPhyBaseFinal, gConEmiSizeFinal, "WIFI-EMI");
 	kalSetEmiMpuProtection(gConEmiPhyBaseFinal, false);
-	pucEmiBaseAddr = ioremap(gConEmiPhyBaseFinal, gConEmiSizeFinal);
+	pucEmiBaseAddr =
+		ioremap_nocache(gConEmiPhyBaseFinal, gConEmiSizeFinal);
 	DBGLOG_LIMITED(INIT, INFO,
 	       "EmiPhyBase:0x%llx offset:0x%x, ioremap region 0x%lX @ 0x%lX\n",
 	       (uint64_t)gConEmiPhyBaseFinal, u4Offset, gConEmiSizeFinal,
@@ -471,7 +472,7 @@ uint32_t wlanDownloadEMISection(IN struct ADAPTER
 		return WLAN_STATUS_FAILURE;
 	}
 
-	kalMemCopyToIo((pucEmiBaseAddr + u4Offset), pucStartPtr, u4Len);
+	kalMemCopy((pucEmiBaseAddr + u4Offset), pucStartPtr, u4Len);
 
 	kalSetEmiMpuProtection(gConEmiPhyBaseFinal, true);
 	iounmap(pucEmiBaseAddr);
@@ -1648,6 +1649,12 @@ uint32_t wlanConfigWifiFunc(IN struct ADAPTER *prAdapter,
 #endif
 	} else {
 		DBGLOG(INIT, INFO, "FW_START EVT success!!\n");
+
+#if defined(_HIF_PCIE)
+		if (ucPDA == PDA_CR4 && prChipInfo->is_support_wacpu)
+			prChipInfo->rx_event_port = WFDMA1_RX_RING_IDX_1;
+#endif /* _HIF_PCIE */
+
 	}
 
 exit:
@@ -1764,6 +1771,7 @@ uint32_t wlanRamCodeDynMemMapSendComplete(IN struct ADAPTER *prAdapter,
 	DBGLOG(INIT, INFO, "FW_START CMD send, waiting for RSP\n");
 
 	if (ucPDA == PDA_CR4 && prChipInfo->is_support_wacpu) {
+		prChipInfo->rx_event_port = WFDMA1_RX_RING_IDX_1;
 		/* workaround for harrier powerOnCal too long issue
 		* skip FW start event, fw ready bit check can cover this.
 		*/
@@ -2282,7 +2290,6 @@ uint32_t wlanDownloadFW(IN struct ADAPTER *prAdapter)
 	u_int8_t fgReady;
 	struct mt66xx_chip_info *prChipInfo;
 	struct FWDL_OPS_T *prFwDlOps;
-	struct timespec64 time;
 #if (CFG_SUPPORT_CONNINFRA == 1)
 	uint32_t rPccifstatus = 0;
 #endif
@@ -2314,23 +2321,6 @@ uint32_t wlanDownloadFW(IN struct ADAPTER *prAdapter)
 
 	if (prFwDlOps->downloadPatch)
 		prFwDlOps->downloadPatch(prAdapter);
-
-	if (prChipInfo->chip_capability & BIT(CHIP_CAPA_FW_LOG_TIME_SYNC)) {
-		ktime_get_real_ts64(&time);
-		rStatus = kalSyncTimeToFW(prAdapter, TRUE,
-			(unsigned int)time.tv_sec,
-			(unsigned int)NSEC_TO_USEC(time.tv_nsec));
-
-		if (rStatus != WLAN_STATUS_SUCCESS) {
-			DBGLOG(INIT, WARN,
-				"Failed to sync kernel time to FW: unhandled CMD ID 0x%x.\n",
-					INIT_CMD_ID_LOG_TIME_SYNC);
-		} else {
-			prAdapter->u4FWLastUpdateTime =
-				(unsigned int)time.tv_sec;
-		}
-
-	}
 
 	if (prFwDlOps->phyAction)
 		prFwDlOps->phyAction(prAdapter);
@@ -2481,8 +2471,10 @@ uint32_t fwDlGetFwdlInfo(struct ADAPTER *prAdapter,
 
 	prFwDlOps = prAdapter->chip_info->fw_dl_ops;
 
-	kalSnprintf(aucBuf, sizeof(aucBuf), "%4s", prVerInfo->aucFwBranchInfo);
-	kalSnprintf(aucDate, sizeof(aucDate), "%16s", prVerInfo->aucFwDateCode);
+	kalMemZero(aucBuf, sizeof(aucBuf));
+	kalStrnCpy(aucBuf, prVerInfo->aucFwBranchInfo, sizeof(aucBuf) - 1);
+	kalMemZero(aucDate, sizeof(aucDate));
+	kalStrnCpy(aucDate, prVerInfo->aucFwDateCode, sizeof(aucDate) - 1);
 
 	u4Offset += snprintf(pcBuf + u4Offset,
 			i4TotalLen - u4Offset,
@@ -2506,11 +2498,12 @@ uint32_t fwDlGetFwdlInfo(struct ADAPTER *prAdapter,
 #endif
 	}
 
-	kalSnprintf(aucBuf, sizeof(aucBuf), "%4s",
-			prVerInfo->rPatchHeader.aucPlatform);
-	kalSnprintf(aucDate, sizeof(aucDate), "%16s",
-			prVerInfo->rPatchHeader.aucBuildDate);
-
+	kalMemZero(aucBuf, sizeof(aucBuf));
+	kalMemZero(aucDate, sizeof(aucDate));
+	kalStrnCpy(aucBuf, prVerInfo->rPatchHeader.aucPlatform,
+			sizeof(aucBuf) - 1);
+	kalStrnCpy(aucDate, prVerInfo->rPatchHeader.aucBuildDate,
+			sizeof(aucDate) - 1);
 	u4Offset += snprintf(pcBuf + u4Offset,
 			     i4TotalLen - u4Offset,
 			     "Patch platform %s version 0x%04X %s\n",

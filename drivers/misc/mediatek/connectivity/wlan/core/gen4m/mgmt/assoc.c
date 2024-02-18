@@ -123,20 +123,13 @@ struct APPEND_VAR_IE_ENTRY txAssocReqIETable[] = {
 #if (CFG_SUPPORT_802_11AX == 1)
 	{(0), heRlmCalculateHeCapIELen, heRlmReqGenerateHeCapIE}
 	,			/* 255, EXT 35 */
-#if (CFG_SUPPORT_WIFI_6G == 1)
-	{(ELEM_HDR_LEN + ELEM_MAX_LEN_HE_6G_CAP), NULL,
-	 heRlmReqGenerateHe6gBandCapIE}
-	,			/* 255, EXT 59 */
-#endif
-#endif
-#if (CFG_SUPPORT_802_11BE == 1)
-	{(0), ehtRlmCalculateCapIELen, ehtRlmReqGenerateCapIE}
-	,
 #endif
 #if CFG_SUPPORT_MTK_SYNERGY
 	{(ELEM_HDR_LEN + ELEM_MIN_LEN_MTK_OUI), NULL, rlmGenerateMTKOuiIE}
-				/* 221 */
+	,			/* 221 */
 #endif
+	{(ELEM_HDR_LEN + ELEM_MAX_LEN_WPA), NULL, rsnGenerateWPAIE}
+	/* 221 */
 };
 
 #if CFG_SUPPORT_AAA
@@ -180,17 +173,6 @@ struct APPEND_VAR_IE_ENTRY txAssocRespIETable[] = {
 	,			/* 255, EXT 35 */
 	{0, heRlmCalculateHeOpIELen, heRlmRspGenerateHeOpIE}
 	,			/* 255, EXT 36 */
-#if (CFG_SUPPORT_WIFI_6G == 1)
-	{(ELEM_HDR_LEN + ELEM_MAX_LEN_HE_6G_CAP), NULL,
-	 heRlmReqGenerateHe6gBandCapIE}
-	,			/* 255, EXT 59 */
-#endif
-#endif
-#if CFG_SUPPORT_802_11BE
-	{0, ehtRlmCalculateCapIELen, ehtRlmRspGenerateCapIE}
-	,
-	{0, ehtRlmCalculateOpIELen, ehtRlmRspGenerateOpIE}
-	,
 #endif
 	{(ELEM_HDR_LEN + ELEM_MAX_LEN_WMM_PARAM), NULL, mqmGenerateWmmParamIE}
 	,			/* 221 */
@@ -287,11 +269,7 @@ uint16_t assocBuildCapabilityInfo(IN struct ADAPTER *prAdapter,
 		 * In TGn 5.2.22, spectrum management bit should set to 1
 		 * to pass the UCC's check.
 		 */
-		if (prBssInfo && (prBssInfo->eBand == BAND_5G
-#if (CFG_SUPPORT_WIFI_6G == 1)
-			|| prBssInfo->eBand == BAND_6G
-#endif
-		))
+		if (prBssInfo && prBssInfo->eBand == BAND_5G)
 			u2CapInfo |= CAP_INFO_SPEC_MGT;
 #endif
 
@@ -693,10 +671,6 @@ uint32_t assocSendReAssocReqFrame(IN struct ADAPTER *prAdapter,
 					       &u2PayloadLen);
 
 	/* 4 <3> Update information of MSDU_INFO_T */
-	nicTxSetPktLifeTime(prMsduInfo, 100);
-	nicTxSetPktRetryLimit(prMsduInfo, TX_DESC_TX_COUNT_NO_LIMIT);
-	nicTxSetForceRts(prMsduInfo, TRUE);
-
 	TX_SET_MMPDU(prAdapter,
 		     prMsduInfo,
 		     prStaRec->ucBssIndex,
@@ -738,8 +712,6 @@ uint32_t assocSendReAssocReqFrame(IN struct ADAPTER *prAdapter,
 	/* Append non-wfa vendor specific ies for AIS mode */
 	assoc_build_nonwfa_vend_ie(prAdapter, prMsduInfo);
 #endif
-
-	sortAssocReqIE(prAdapter, prMsduInfo, fgIsReAssoc);
 
 	/* 4 <6> Update the (Re)association request information */
 	if (IS_STA_IN_AIS(prStaRec)) {
@@ -1296,10 +1268,6 @@ uint32_t assocSendDisAssocFrame(IN struct ADAPTER *prAdapter,
 	u2PayloadLen = REASON_CODE_FIELD_LEN;
 
 	/* 4 <3> Update information of MSDU_INFO_T */
-	nicTxSetPktLifeTime(prMsduInfo, 100);
-	nicTxSetPktRetryLimit(prMsduInfo, TX_DESC_TX_COUNT_NO_LIMIT);
-	nicTxSetForceRts(prMsduInfo, TRUE);
-
 	TX_SET_MMPDU(prAdapter,
 		     prMsduInfo,
 		     prStaRec->ucBssIndex,
@@ -1591,17 +1559,12 @@ uint32_t assocProcessRxAssocReqFrame(IN struct ADAPTER *prAdapter,
 				return WLAN_STATUS_FAILURE;
 			}
 			break;
-		case ELEM_ID_RESERVED:
 #if (CFG_SUPPORT_802_11AX == 1)
+		case ELEM_ID_RESERVED:
 			if (IE_ID_EXT(pucIE) == ELEM_EXT_ID_HE_CAP)
 				prStaRec->ucPhyTypeSet |= PHY_TYPE_SET_802_11AX;
-#endif
-#if (CFG_SUPPORT_802_11BE == 1)
-			if (IE_ID_EXT(pucIE) == EID_EXT_EHT_CAPS)
-				prStaRec->ucPhyTypeSet |= PHY_TYPE_SET_802_11BE;
-#endif
 			break;
-
+#endif
 		default:
 			for (i = 0;
 			     i <
@@ -2000,10 +1963,6 @@ uint32_t assocSendReAssocRespFrame(IN struct ADAPTER *prAdapter,
 			&u2PayloadLen);
 
 	/* 4 <3> Update information of MSDU_INFO_T */
-	nicTxSetPktLifeTime(prMsduInfo, 100);
-	nicTxSetPktRetryLimit(prMsduInfo, TX_DESC_TX_COUNT_NO_LIMIT);
-	nicTxSetForceRts(prMsduInfo, TRUE);
-
 	TX_SET_MMPDU(prAdapter,
 		     prMsduInfo,
 		     prStaRec->ucBssIndex,
@@ -2028,13 +1987,6 @@ uint32_t assocSendReAssocRespFrame(IN struct ADAPTER *prAdapter,
 			txAssocRespIETable[i].pfnAppendIE(prAdapter,
 							  prMsduInfo);
 
-	}
-
-	DBGLOG(AAA, TRACE, "Dump assoc response frame\n");
-
-	if (aucDebugModule[DBG_P2P_IDX] & DBG_CLASS_TRACE) {
-		dumpMemory8((uint8_t *) prMsduInfo->prPacket,
-			(uint32_t) prMsduInfo->u2FrameLength);
 	}
 
 #if CFG_SUPPORT_WFD

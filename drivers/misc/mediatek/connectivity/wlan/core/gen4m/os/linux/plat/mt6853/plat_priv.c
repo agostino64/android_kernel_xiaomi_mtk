@@ -2,25 +2,17 @@
 /*
  * Copyright (c) 2019 MediaTek Inc.
  */
-#include "gl_os.h"
 
-#if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
-/*TODO kernel 5.4 boost CPU */
-#else
 #include <cpu_ctrl.h>
 #include <topo_ctrl.h>
-#include <helio-dvfsrc-opp.h>
-#endif
 #include <linux/pm_qos.h>
+#include <helio-dvfsrc-opp.h>
+
 #include "precomp.h"
 #include "wmt_exp.h"
 
-#ifdef CONFIG_WLAN_MTK_EMI
-#if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
-#include <soc/mediatek/emi.h>
-#else
+#ifdef CONFIG_MEDIATEK_EMI
 #include <memory/mediatek/emi.h>
-#endif
 #define WIFI_EMI_MEM_OFFSET    0x1D0000
 #define WIFI_EMI_MEM_SIZE      0x140000
 #define DOMAIN_AP	0
@@ -29,9 +21,8 @@
 
 #define MAX_CPU_FREQ (3 * 1024 * 1024) /* in kHZ */
 #define MAX_CLUSTER_NUM  3
-#define CPU_ALL_CORE (0xff)
 #define CPU_BIG_CORE (0xc0)
-#define CPU_LITTLE_CORE (CPU_ALL_CORE - CPU_BIG_CORE)
+#define CPU_SMALL_CORE (0xff - CPU_BIG_CORE)
 
 enum ENUM_CPU_BOOST_STATUS {
 	ENUM_CPU_BOOST_STATUS_INIT = 0,
@@ -65,8 +56,6 @@ int32_t kalCheckTputLoad(IN struct ADAPTER *prAdapter,
 	       TRUE : FALSE;
 }
 
-#if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
-#else
 int32_t kalBoostCpu(IN struct ADAPTER *prAdapter,
 		    IN uint32_t u4TarPerfLevel,
 		    IN uint32_t u4BoostCpuTh)
@@ -80,7 +69,7 @@ int32_t kalBoostCpu(IN struct ADAPTER *prAdapter,
 
 	uint32_t u4ClusterNum = topo_ctrl_get_nr_clusters();
 
-	WIPHY_PRIV(wlanGetWiphy(), prGlueInfo);
+	prGlueInfo = (struct GLUE_INFO *)wiphy_priv(wlanGetWiphy());
 	ASSERT(u4ClusterNum <= MAX_CLUSTER_NUM);
 	/* ACAO, we dont have to set core number */
 	i4Freq = (u4TarPerfLevel >= u4BoostCpuTh) ? MAX_CPU_FREQ : -1;
@@ -91,7 +80,7 @@ int32_t kalBoostCpu(IN struct ADAPTER *prAdapter,
 
 	if (fgRequested == ENUM_CPU_BOOST_STATUS_INIT) {
 		/* initially enable rps working at small cores */
-		kalSetRpsMap(prGlueInfo, CPU_LITTLE_CORE);
+		kalSetRpsMap(prGlueInfo, CPU_SMALL_CORE);
 		fgRequested = ENUM_CPU_BOOST_STATUS_STOP;
 	}
 
@@ -125,7 +114,7 @@ int32_t kalBoostCpu(IN struct ADAPTER *prAdapter,
 			set_task_util_min_pct(prGlueInfo->u4TxThreadPid, 0);
 			set_task_util_min_pct(prGlueInfo->u4RxThreadPid, 0);
 			set_task_util_min_pct(prGlueInfo->u4HifThreadPid, 0);
-			kalSetRpsMap(prGlueInfo, CPU_LITTLE_CORE);
+			kalSetRpsMap(prGlueInfo, CPU_SMALL_CORE);
 			update_userlimit_cpu_freq(CPU_KIR_WIFI,
 				u4ClusterNum, freq_to_set);
 
@@ -140,9 +129,8 @@ int32_t kalBoostCpu(IN struct ADAPTER *prAdapter,
 
 	return 0;
 }
-#endif
 
-#ifdef CONFIG_WLAN_MTK_EMI
+#ifdef CONFIG_MEDIATEK_EMI
 void kalSetEmiMpuProtection(phys_addr_t emiPhyBase, bool enable)
 {
 }
@@ -177,7 +165,7 @@ void kalSetDrvEmiMpuProtection(phys_addr_t emiPhyBase, uint32_t offset,
 }
 #endif
 
-int32_t kalGetFwFlavorByPlat(uint8_t *flavor)
+int32_t kalGetFwFlavor(uint8_t *flavor)
 {
 	int32_t ret = 1;
 	const uint32_t adie_chip_id = mtk_wcn_wmt_ic_info_get(WMTCHIN_ADIE);

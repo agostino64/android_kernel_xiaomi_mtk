@@ -94,7 +94,7 @@ const uint8_t aucDataRate[] = {
 	RATE_54M,		/* RATE_54M_INDEX */
 	RATE_VHT_PHY,		/* RATE_VHT_PHY_INDEX */
 	RATE_HT_PHY,		/* RATE_HT_PHY_INDEX */
-	RATE_H2E_ONLY		/* RATE_H2E_ONLY_INDEX */
+	RATE_H2E_ONLY   /* RATE_H2E_ONLY_INDEX */
 };
 
 static const uint8_t aucDefaultAckCtsRateIndex[RATE_NUM_SW] = {
@@ -202,12 +202,6 @@ rateGetRateSetFromIEs(
 		 */
 		ASSERT(prIeSupportedRate->ucLength <= RATE_NUM_SW);
 
-		if (aucDebugModule[DBG_P2P_IDX] & DBG_CLASS_TRACE) {
-			DBGLOG(RLM, TRACE, "Dump supported rate\n");
-			dumpMemory8((uint8_t *) prIeSupportedRate,
-				(uint32_t) prIeSupportedRate->ucLength);
-		}
-
 		for (i = 0; i < prIeSupportedRate->ucLength; i++) {
 			ucRate =
 			    prIeSupportedRate->aucSupportedRates[i] & RATE_MASK;
@@ -272,11 +266,6 @@ rateGetRateSetFromIEs(
 	*pu2OperationalRateSet = u2OperationalRateSet;
 	*pu2BSSBasicRateSet = u2BSSBasicRateSet;
 	*pfgIsUnknownBSSBasicRate = fgIsUnknownBSSBasicRate;
-
-	DBGLOG(RLM, TRACE, "OP rate:%d, Basic rate:%d, Unknown rate:%d\n",
-		u2OperationalRateSet,
-		u2BSSBasicRateSet,
-		fgIsUnknownBSSBasicRate);
 
 	return;
 

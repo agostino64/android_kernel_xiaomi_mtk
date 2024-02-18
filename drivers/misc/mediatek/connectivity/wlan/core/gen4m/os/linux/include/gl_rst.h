@@ -143,10 +143,6 @@ enum _ENUM_CHIP_RESET_REASON_TYPE_T {
 	RST_WIFI_ON_DRV_OWN_FAIL,
 	RST_CHECK_READY_BIT_TIMEOUT,
 	RST_ALLOC_CMD_FAIL,
-	RST_SDIO_RX_ERROR,
-	RST_WHOLE_CHIP_TRIGGER,
-	RST_MDDP_MD_TRIGGER_EXCEPTION,
-	RST_FWK_TRIGGER,
 	RST_REASON_MAX
 };
 
@@ -305,8 +301,6 @@ void glResetInit(struct GLUE_INFO *prGlueInfo);
 void glResetUninit(void);
 
 void glSendResetRequest(void);
-
-void glResetWholeChipResetTrigger(char *pcReason);
 
 u_int8_t glResetTrigger(struct ADAPTER *prAdapter,
 			uint32_t u4RstFlag, const uint8_t *pucFile,

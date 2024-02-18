@@ -116,7 +116,7 @@ extern const struct net_device_ops p2p_netdev_ops;
  */
 
 extern struct net_device *g_P2pPrDev;
-extern struct wireless_dev *gprP2pWdev[KAL_P2P_NUM];
+extern struct wireless_dev *gprP2pWdev;
 extern struct wireless_dev *gprP2pRoleWdev[KAL_P2P_NUM];
 
 /******************************************************************************
@@ -238,7 +238,6 @@ struct GL_P2P_INFO {
 	struct completion rStopApComp;
 
 	enum ENUM_CHNL_SWITCH_POLICY eChnlSwitchPolicy;
-	u_int8_t fgChannelSwitchReq;
 };
 
 struct GL_P2P_DEV_INFO {
@@ -328,14 +327,6 @@ struct NL80211_DRIVER_WFD_PARAMS {
 	uint8_t aucReserved4[64];
 };
 #endif
-
-struct NL80211_DRIVER_UPDATE_STA_PMKID_PARAMS {
-	struct NL80211_DRIVER_TEST_PARAMS hdr;
-	uint8_t aucBssid[MAC_ADDR_LEN];
-	uint8_t aucSta[MAC_ADDR_LEN];
-	uint8_t aucPmkid[IW_PMKID_LEN];
-	uint8_t ucAddRemove;	/*1- ADD, 0- Remove*/
-};
 #endif
 
 /******************************************************************************

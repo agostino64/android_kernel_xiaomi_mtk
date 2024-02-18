@@ -72,9 +72,6 @@
  */
 #include "precomp.h"
 #include "que_mgt.h"
-#if CFG_SUPPORT_NAN
-#include "nan_txm.h"
-#endif
 
 /*******************************************************************************
  *                              C O N S T A N T S
@@ -291,12 +288,8 @@ void nicTxInitialize(IN struct ADAPTER *prAdapter)
 	/* Tx sequence number */
 	prAdapter->ucTxSeqNum = 0;
 	/* PID pool */
-	for (i = 0; i < WTBL_SIZE; i++) {
+	for (i = 0; i < WTBL_SIZE; i++)
 		prAdapter->aucPidPool[i] = NIC_TX_DESC_DRIVER_PID_MIN;
-#if CFG_SUPPORT_LIMITED_PKT_PID
-		nicTxInitPktPID(prAdapter, i);
-#endif /* CFG_SUPPORT_LIMITED_PKT_PID */
-	}
 
 	/* enable/disable TX resource control */
 	prTxCtrl->fgIsTxResourceCtrl = NIC_TX_RESOURCE_CTRL;
@@ -1204,45 +1197,6 @@ uint32_t nicTxMsduInfoList(IN struct ADAPTER *prAdapter,
 	return WLAN_STATUS_SUCCESS;
 }
 
-#if CFG_SUPPORT_DROP_INVALID_MSDUINFO
-/*----------------------------------------------------------------------------*/
-/*!
- * @brief In this function, we'll drop invalid MsduInfo and
- * dump some debug log
- *
- * @param prAdapter              Pointer to the Adapter structure.
- * @param prMsduInfo             Pointer of the invalid MsduInfo
- *
- */
-/*----------------------------------------------------------------------------*/
-void nicTxDropInvalidMsduInfo(IN struct ADAPTER *prAdapter,
-	IN struct MSDU_INFO *prMsduInfo)
-{
-	/* Dump mem for debugging */
-	DBGLOG(TX, ERROR, "[B] Dump invalid prMsduInfo & StaRec.\n");
-	nicDumpMsduInfo(prMsduInfo);
-	cnmDumpStaRec(prAdapter, prMsduInfo->ucStaRecIndex);
-	DBGLOG(TX, ERROR, "[E] Dump invalid prMsduInfo & StaRec.\n");
-
-	TX_INC_CNT(&prAdapter->rTxCtrl, TX_INVALID_MSDUINFO_COUNT);
-	if (prMsduInfo->ucPacketType == TX_PACKET_TYPE_DATA) {
-		if (prMsduInfo->pfTxDoneHandler)
-			prMsduInfo->pfTxDoneHandler(prAdapter, prMsduInfo,
-		    TX_RESULT_DROPPED_IN_DRIVER);
-	}
-
-	/* Remove next link */
-	QM_TX_SET_NEXT_MSDU_INFO(prMsduInfo, NULL);
-
-	/* Release Tx resource */
-	nicTxReleaseResource_PSE(prAdapter, prMsduInfo->ucTC,
-		nicTxGetPageCount(prAdapter,
-		prMsduInfo->u2FrameLength, TRUE), TRUE);
-	nicTxFreePacket(prAdapter, prMsduInfo, TRUE);
-	nicTxReturnMsduInfo(prAdapter, prMsduInfo);
-}
-#endif /* CFG_SUPPORT_DROP_INVALID_MSDUINFO */
-
 #if CFG_SUPPORT_MULTITHREAD
 /*----------------------------------------------------------------------------*/
 /*!
@@ -1282,16 +1236,6 @@ uint32_t nicTxMsduInfoListMthread(IN struct ADAPTER
 		prNextMsduInfo = (struct MSDU_INFO *) QUEUE_GET_NEXT_ENTRY((
 					 struct QUE_ENTRY *) prMsduInfo);
 
-		nicTxFillDataDesc(prAdapter, prMsduInfo);
-#if CFG_SUPPORT_DROP_INVALID_MSDUINFO
-		/* Drop invalid MsduInfo */
-		if (unlikely(prMsduInfo->fgDrop)) {
-			nicTxDropInvalidMsduInfo(prAdapter, prMsduInfo);
-			prMsduInfo = prNextMsduInfo;
-			continue;
-		}
-#endif /* CFG_SUPPORT_DROP_INVALID_MSDUINFO */
-
 		switch (prMsduInfo->ucTC) {
 		case TC0_INDEX:
 		case TC1_INDEX:
@@ -1314,6 +1258,8 @@ uint32_t nicTxMsduInfoListMthread(IN struct ADAPTER
 			ASSERT(0);
 			break;
 		}
+
+		nicTxFillDataDesc(prAdapter, prMsduInfo);
 
 		prMsduInfo = prNextMsduInfo;
 	}
@@ -1356,17 +1302,6 @@ uint32_t nicTxMsduInfoListMthread(IN struct ADAPTER
 		fgSetTx2Hif = TRUE;
 		prNextMsduInfo = (struct MSDU_INFO *) QUEUE_GET_NEXT_ENTRY((
 					 struct QUE_ENTRY *) prMsduInfo);
-
-		nicTxFillDataDesc(prAdapter, prMsduInfo);
-#if CFG_SUPPORT_DROP_INVALID_MSDUINFO
-		/* Drop invalid MsduInfo */
-		if (unlikely(prMsduInfo->fgDrop)) {
-			nicTxDropInvalidMsduInfo(prAdapter, prMsduInfo);
-			prMsduInfo = prNextMsduInfo;
-			continue;
-		}
-#endif /* CFG_SUPPORT_DROP_INVALID_MSDUINFO */
-
 		if (prMsduInfo->ucTC >= 0 &&
 		    prMsduInfo->ucTC < TC_NUM) {
 			QUEUE_GET_NEXT_ENTRY(
@@ -1378,6 +1313,7 @@ uint32_t nicTxMsduInfoListMthread(IN struct ADAPTER
 		} else
 			ASSERT(0);
 
+		nicTxFillDataDesc(prAdapter, prMsduInfo);
 		GLUE_INC_REF_CNT(prAdapter->rHifStats.u4DataInCount);
 
 		prMsduInfo = prNextMsduInfo;
@@ -1861,9 +1797,6 @@ nicTxForceAmsduForCert(
 			HAL_MAC_CONNAC2X_TXD_SET_HW_AMSDU(prTxDesc);
 	}
 #endif /* (CFG_SUPPORT_802_11AX == 1) && (CFG_SUPPORT_CONNAC2X == 1) */
-#if (CFG_SUPPORT_802_11BE == 1)
-	/* TODO */
-#endif
 }
 
 u_int8_t nicTxIsTXDTemplateAllowed(IN struct ADAPTER
@@ -1920,8 +1853,6 @@ nicTxFillDesc(IN struct ADAPTER *prAdapter,
 	uint8_t ucChksumFlag = 0;
 #endif
 	struct TX_DESC_OPS_T *prTxDescOps = prChipInfo->prTxDescOps;
-	struct BSS_INFO *prBssInfo;
-	uint8_t ucWmmQueSet;
 
 	/*
 	 * -------------------------------------------------------------------
@@ -1937,9 +1868,6 @@ nicTxFillDesc(IN struct ADAPTER *prAdapter,
 			prStaRec->aprTxDescTemplate[prMsduInfo->ucUserPriority];
 	}
 	if (prTxDescTemplate) {
-		prBssInfo = GET_BSS_INFO_BY_INDEX(prAdapter,
-			prMsduInfo->ucBssIndex);
-		ucWmmQueSet = prBssInfo->ucWmmQueSet;
 		prMsduInfo->ucWlanIndex = nicTxGetWlanIdx(prAdapter,
 			prMsduInfo->ucBssIndex, prMsduInfo->ucStaRecIndex);
 		if (prMsduInfo->ucPacketType == TX_PACKET_TYPE_DATA)
@@ -1949,21 +1877,6 @@ nicTxFillDesc(IN struct ADAPTER *prAdapter,
 			kalMemCopy(prTxDesc, prTxDescTemplate, u4TxDescLength);
 		/* Overwrite fields for EOSP or More data */
 		nicTxFillDescByPktOption(prAdapter, prMsduInfo, prTxDesc);
-
-#if CFG_SUPPORT_DROP_INVALID_MSDUINFO
-		if (unlikely(prMsduInfo->ucPacketType
-			== TX_PACKET_TYPE_DATA &&
-			prBssInfo->ucWmmQueSet !=
-			prMsduInfo->ucWmmQueSet)) {
-			prMsduInfo->fgDrop = TRUE;
-			DBGLOG(RSN, ERROR,
-				"WmmQueSet mismatch[%u,%u,%u,%u]\n",
-				prMsduInfo->ucBssIndex,
-				prMsduInfo->ucStaRecIndex,
-				ucWmmQueSet,
-				prMsduInfo->ucWmmQueSet);
-		}
-#endif
 	} else { /* Compose TXD by Msdu info */
 		DBGLOG_LIMITED(NIC, TRACE, "Compose TXD by Msdu info\n");
 #if (UNIFIED_MAC_TX_FORMAT == 1)
@@ -1993,25 +1906,22 @@ nicTxFillDesc(IN struct ADAPTER *prAdapter,
 
 	/* Checksum offload */
 #if CFG_TCP_IP_CHKSUM_OFFLOAD
-	if (prAdapter->fgIsSupportCsumOffload &&
-	    prMsduInfo->eSrc == TX_PACKET_OS &&
-	    prAdapter->u4CSUMFlags & CSUM_OFFLOAD_EN_TX_MASK) {
-		ASSERT(prMsduInfo->prPacket);
-		kalQueryTxChksumOffloadParam(prMsduInfo->prPacket,
-					     &ucChksumFlag);
-		/*
-		 * AMSDU needs this force checksum offload fix.
-		 * RX GRO from modem caused some CHECKSUM_UNNECESSARY
-		 * and some CHECKSUM_PARTIAL.
-		 * Remove this forced checksum flag setting and back to
-		 * kalQueryTxChksumOffloadParam() when per frame AMSDU is ready.
-		 */
-		ucChksumFlag |= TX_CS_IP_GEN | TX_CS_TCP_UDP_GEN;
-
-		if (prTxDescOps->nic_txd_chksum_op)
-			prTxDescOps->nic_txd_chksum_op(prTxDesc, ucChksumFlag);
-		else
-			DBGLOG(TX, ERROR, "no nic_txd_chksum_op??\n");
+	if (prAdapter->fgIsSupportCsumOffload
+	    && prMsduInfo->eSrc == TX_PACKET_OS) {
+		if (prAdapter->u4CSUMFlags &
+		    (CSUM_OFFLOAD_EN_TX_TCP | CSUM_OFFLOAD_EN_TX_UDP |
+		     CSUM_OFFLOAD_EN_TX_IP)) {
+			ASSERT(prMsduInfo->prPacket);
+			kalQueryTxChksumOffloadParam(prMsduInfo->prPacket,
+						     &ucChksumFlag);
+			if (prTxDescOps->nic_txd_chksum_op)
+				prTxDescOps->nic_txd_chksum_op(
+					prTxDesc, ucChksumFlag);
+			else
+				DBGLOG(TX, ERROR,
+					"%s:: no nic_txd_chksum_op??\n",
+					__func__);
+		}
 	}
 #endif /* CFG_TCP_IP_CHKSUM_OFFLOAD */
 
@@ -2023,15 +1933,6 @@ nicTxFillDesc(IN struct ADAPTER *prAdapter,
 		DBGLOG(TX, ERROR,
 			"%s:: no nic_txd_header_format_op??\n",
 			__func__);
-
-#if CFG_SUPPORT_NAN
-	/* BMC */
-	if (prMsduInfo->ucStaRecIndex == STA_REC_INDEX_BMCAST) {
-		/* NAN Todo: not using the struct HW_MAC_TX_DESC */
-		HAL_MAC_TX_DESC_SET_BMC((struct HW_MAC_TX_DESC *)prTxDesc);
-		HAL_MAC_TX_DESC_SET_NO_ACK((struct HW_MAC_TX_DESC *)prTxDesc);
-	}
-#endif
 
 	if (pu4TxDescLength)
 		*pu4TxDescLength = u4TxDescLength;
@@ -2051,13 +1952,8 @@ nicTxFillDataDesc(IN struct ADAPTER *prAdapter,
 
 	nicTxFillDesc(prAdapter, prMsduInfo, pucOutputBuf, NULL);
 	/* dump TXD to debug TX issue */
-	if (prAdapter->rWifiVar.ucDataTxDone == 1) {
-		struct CHIP_DBG_OPS *prDbgOps =
-			prAdapter->chip_info->prDebugOps;
-		if (prDbgOps && prDbgOps->dumpTxdInfo)
-			prDbgOps->dumpTxdInfo(prAdapter,
-			(uint8_t *)pucOutputBuf);
-	}
+	if (prAdapter->rWifiVar.ucDataTxDone == 1)
+		halDumpTxdInfo(prAdapter, (uint32_t *)pucOutputBuf);
 }
 
 void
@@ -2247,36 +2143,47 @@ void nicTxFreeDescTemplate(IN struct ADAPTER *prAdapter,
 	uint8_t ucTid;
 	uint8_t ucTxDescSize;
 	void *prTxDesc;
-	void *prFirstTxDesc;
 
 	DBGLOG(QM, TRACE, "Free TXD template for STA[%u] QoS[%u]\n",
 	       prStaRec->ucIndex, prStaRec->fgIsQoS);
 
 	prTxDescOps = prAdapter->chip_info->prTxDescOps;
+	if (prStaRec->fgIsQoS) {
+		for (ucTid = 0; ucTid < TX_DESC_TID_NUM; ucTid++) {
+			prTxDesc = prStaRec->aprTxDescTemplate[ucTid];
 
-	prFirstTxDesc = prStaRec->aprTxDescTemplate[0];
-	for (ucTid = 0; ucTid < TX_DESC_TID_NUM; ucTid++) {
-		prTxDesc = prStaRec->aprTxDescTemplate[ucTid];
+			if (prTxDesc) {
+				if (prTxDescOps->nic_txd_long_format_op(
+					prTxDesc, FALSE))
+					ucTxDescSize =
+						NIC_TX_DESC_LONG_FORMAT_LENGTH;
+				else
+					ucTxDescSize =
+						NIC_TX_DESC_SHORT_FORMAT_LENGTH;
 
+				kalMemFree(prTxDesc, VIR_MEM_TYPE,
+					ucTxDescSize);
+
+				prTxDesc =
+					prStaRec->aprTxDescTemplate[ucTid] =
+					NULL;
+			}
+		}
+	} else {
+		prTxDesc = prStaRec->aprTxDescTemplate[0];
 		if (prTxDesc) {
-			if (ucTid > 0 && prTxDesc == prFirstTxDesc)
-				break;
 			if (prTxDescOps->nic_txd_long_format_op(
 				prTxDesc, FALSE))
-				ucTxDescSize =
-					NIC_TX_DESC_LONG_FORMAT_LENGTH;
+				ucTxDescSize = NIC_TX_DESC_LONG_FORMAT_LENGTH;
 			else
-				ucTxDescSize =
-					NIC_TX_DESC_SHORT_FORMAT_LENGTH;
+				ucTxDescSize = NIC_TX_DESC_SHORT_FORMAT_LENGTH;
 
-			kalMemFree(prTxDesc, VIR_MEM_TYPE,
-				ucTxDescSize);
+			kalMemFree(prTxDesc, VIR_MEM_TYPE, ucTxDescSize);
+			prTxDesc = NULL;
 		}
+		for (ucTid = 0; ucTid < TX_DESC_TID_NUM; ucTid++)
+			prStaRec->aprTxDescTemplate[ucTid] = NULL;
 	}
-
-	for (ucTid = 0; ucTid < TX_DESC_TID_NUM; ucTid++)
-		prStaRec->aprTxDescTemplate[ucTid] = NULL;
-
 }
 
 /*----------------------------------------------------------------------------*/
@@ -2424,7 +2331,6 @@ void nicHifTxMsduDoneCb(IN struct ADAPTER *prAdapter,
 uint32_t nicTxMsduQueue(IN struct ADAPTER *prAdapter,
 			uint8_t ucPortIdx, struct QUE *prQue)
 {
-	struct HIF_STATS *prHifStats;
 	struct MSDU_INFO *prMsduInfo;
 	struct TX_CTRL *prTxCtrl;
 	struct QUE qDataTemp, *prDataTemp = NULL;
@@ -2432,7 +2338,6 @@ uint32_t nicTxMsduQueue(IN struct ADAPTER *prAdapter,
 	ASSERT(prAdapter);
 	ASSERT(prQue);
 
-	prHifStats = &prAdapter->rHifStats;
 	prTxCtrl = &prAdapter->rTxCtrl;
 
 #if CFG_HIF_STATISTICS
@@ -2471,13 +2376,6 @@ uint32_t nicTxMsduQueue(IN struct ADAPTER *prAdapter,
 
 #if !CFG_SUPPORT_MULTITHREAD
 		nicTxFillDataDesc(prAdapter, prMsduInfo);
-#if CFG_SUPPORT_DROP_INVALID_MSDUINFO
-		/* Drop invalid MsduInfo */
-		if (unlikely(prMsduInfo->fgDrop)) {
-			nicTxDropInvalidMsduInfo(prAdapter, prMsduInfo);
-			continue;
-		}
-#endif /* CFG_SUPPORT_DROP_INVALID_MSDUINFO */
 #endif
 
 		if (prMsduInfo->eSrc == TX_PACKET_OS) {
@@ -2485,7 +2383,9 @@ uint32_t nicTxMsduQueue(IN struct ADAPTER *prAdapter,
 					       TX_PROF_TAG_DRV_TX_DONE);
 			wlanFillTimestamp(prAdapter, prMsduInfo->prPacket,
 					       PHASE_HIF_TX);
-		} else if (!fgTxDoneHandler)
+		}
+
+		if (!fgTxDoneHandler)
 			wlanTxProfilingTagMsdu(prAdapter, prMsduInfo,
 						TX_PROF_TAG_DRV_TX_DONE);
 
@@ -2496,7 +2396,6 @@ uint32_t nicTxMsduQueue(IN struct ADAPTER *prAdapter,
 	}
 
 	HAL_KICK_TX_DATA(prAdapter);
-	prHifStats->u4TxDataRegCnt++;
 
 	if (QUEUE_IS_NOT_EMPTY(prQue))
 		QUEUE_CONCATENATE_QUEUES(prDataTemp, prQue);
@@ -2541,13 +2440,9 @@ uint32_t nicTxCmd(IN struct ADAPTER *prAdapter,
 		prMsduInfo = prCmdInfo->prMsduInfo;
 
 		/* dump TXD to debug TX issue */
-		if (prAdapter->rWifiVar.ucDataTxDone == 3) {
-			struct CHIP_DBG_OPS *prDbgOps =
-				prAdapter->chip_info->prDebugOps;
-			if (prDbgOps && prDbgOps->dumpTxdInfo)
-				prDbgOps->dumpTxdInfo(prAdapter,
-				(uint8_t *)prMsduInfo->aucTxDescBuffer);
-		}
+		if (prAdapter->rWifiVar.ucDataTxDone == 3)
+			halDumpTxdInfo(prAdapter,
+				(uint32_t *)prMsduInfo->aucTxDescBuffer);
 
 		prCmdInfo->pucTxd = prMsduInfo->aucTxDescBuffer;
 		if (prTxDescOps->nic_txd_long_format_op(
@@ -2594,13 +2489,9 @@ uint32_t nicTxCmd(IN struct ADAPTER *prAdapter,
 		ASSERT(prMsduInfo->eSrc == TX_PACKET_MGMT);
 
 		/* dump TXD to debug TX issue */
-		if (prAdapter->rWifiVar.ucDataTxDone == 3) {
-			struct CHIP_DBG_OPS *prDbgOps =
-				prAdapter->chip_info->prDebugOps;
-			if (prDbgOps && prDbgOps->dumpTxdInfo)
-				prDbgOps->dumpTxdInfo(prAdapter,
-				(uint8_t *)prMsduInfo->aucTxDescBuffer);
-		}
+		if (prAdapter->rWifiVar.ucDataTxDone == 3)
+			halDumpTxdInfo(prAdapter,
+				(uint32_t *)prMsduInfo->aucTxDescBuffer);
 
 		prCmdInfo->pucTxd = prMsduInfo->aucTxDescBuffer;
 		if (prTxDescOps->nic_txd_long_format_op(
@@ -2711,15 +2602,6 @@ void nicTxRelease(IN struct ADAPTER *prAdapter,
 void nicProcessTxInterrupt(IN struct ADAPTER *prAdapter)
 {
 	struct WIFI_VAR *prWifiVar = &prAdapter->rWifiVar;
-
-	/* fos_change begin */
-#if CFG_SUPPORT_WAKEUP_REASON_DEBUG
-#if CFG_SUPPORT_WAKEUP_STATISTICS
-	if (kalIsWakeupByWlan(prAdapter))
-		nicUpdateWakeupStatistics(prAdapter, TX_INT);
-#endif
-#endif /* fos_change end */
-
 
 	prAdapter->prGlueInfo->IsrTxCnt++;
 	halProcessTxInterrupt(prAdapter);
@@ -2893,53 +2775,6 @@ void nicTxReturnMsduInfo(IN struct ADAPTER *prAdapter,
 
 }
 
-#if CFG_SUPPORT_LIMITED_PKT_PID
-void nicTxInitPktPID(
-	IN struct ADAPTER *prAdapter,
-	IN uint8_t ucWlanIndex
-)
-{
-	int i = 0;
-
-	ASSERT(prAdapter);
-	ASSERT(ucWlanIndex < WTBL_SIZE);
-
-	for (i = 0; i < ENUM_PKT_FLAG_NUM; i++) {
-		GET_CURRENT_SYSTIME(
-			&prAdapter->u4PktPIDTime[ucWlanIndex][i]
-		);
-	}
-}
-
-static inline bool nicTxPktPIDIsLimited(
-	IN struct ADAPTER *prAdapter,
-	IN struct MSDU_INFO *prMsduInfo
-)
-{
-	struct WIFI_VAR *prWifiVar = &prAdapter->rWifiVar;
-	uint8_t ucWlanIndex = prMsduInfo->ucWlanIndex;
-	uint8_t ucPktType = prMsduInfo->ucPktType;
-
-	/* only limit dns and arp */
-	if (ucPktType != ENUM_PKT_DNS
-		&& ucPktType != ENUM_PKT_ARP)
-		return FALSE;
-
-	if (CHECK_FOR_TIMEOUT(kalGetTimeTick(),
-		prAdapter->u4PktPIDTime[ucWlanIndex][ucPktType],
-		prWifiVar->u4PktPIDTimeout
-		)) {
-
-		GET_CURRENT_SYSTIME(
-			&prAdapter->u4PktPIDTime[ucWlanIndex][ucPktType]
-		);
-		return FALSE;
-	}
-
-	return TRUE;
-}
-#endif /* CFG_SUPPORT_LIMITED_PKT_PID */
-
 /*----------------------------------------------------------------------------*/
 /*!
  * @brief this function fills packet information to P_MSDU_INFO_T
@@ -3020,18 +2855,8 @@ u_int8_t nicTxFillMsduInfo(IN struct ADAPTER *prAdapter,
 		}
 #endif
 		if (prMsduInfo->ucPktType != 0) {
-			prMsduInfo->u4Option |= MSDU_OPT_NO_AGGREGATE;
-#if CFG_SUPPORT_LIMITED_PKT_PID
-			if (!nicTxPktPIDIsLimited(prAdapter, prMsduInfo)) {
-#endif /* CFG_SUPPORT_LIMITED_PKT_PID */
 			prMsduInfo->pfTxDoneHandler = wlanPktTxDone;
 			prMsduInfo->ucTxSeqNum = GLUE_GET_PKT_SEQ_NO(prPacket);
-#if CFG_SUPPORT_LIMITED_PKT_PID
-			} else {
-				TX_INC_CNT(&prAdapter->rTxCtrl,
-					TX_DROP_PID_COUNT);
-			}
-#endif /* CFG_SUPPORT_LIMITED_PKT_PID */
 		}
 
 #if CFG_SUPPORT_WIFI_SYSDVT
@@ -3498,21 +3323,8 @@ void nicTxProcessTxDoneEvent(IN struct ADAPTER *prAdapter,
 	struct MSDU_INFO *prMsduInfo;
 	struct TX_CTRL *prTxCtrl = &prAdapter->rTxCtrl;
 	char *prBw = "INVALID";
-	char *prTxResult = "UNDEFINED";
 
 	prTxDone = (struct EVENT_TX_DONE *) (prEvent->aucBuffer);
-
-/* fos_change begin */
-#if CFG_SUPPORT_EXCEPTION_STATISTICS
-	if (prTxDone->ucStatus != WLAN_STATUS_SUCCESS) {
-		prAdapter->total_tx_done_fail_count++;
-		if (prTxDone->ucStatus < TX_RESULT_NUM)
-			prAdapter->tx_done_fail_count[prTxDone->ucStatus]++;
-	}
-#endif /* fos_change end */
-
-	if (likely(prTxDone->ucStatus < TX_RESULT_NUM))
-		prTxResult = apucTxResultStr[prTxDone->ucStatus];
 
 	if (prTxDone->ucFlag & BIT(TXS_WITH_ADVANCED_INFO)) {
 		/* Tx Done with advanced info */
@@ -3521,7 +3333,7 @@ void nicTxProcessTxDoneEvent(IN struct ADAPTER *prAdapter,
 				"EVENT_ID_TX_DONE WIDX:PID[%u:%u] Status[%u:%s] SN[%u] TID[%u] CNT[%u] Flush[%u]\n",
 				prTxDone->ucWlanIndex, prTxDone->ucPacketSeq,
 				prTxDone->ucStatus,
-				prTxResult,
+				apucTxResultStr[prTxDone->ucStatus],
 				prTxDone->u2SequenceNumber, prTxDone->ucTid,
 				prTxDone->ucTxCount, prTxDone->ucFlushReason);
 		else
@@ -3529,33 +3341,21 @@ void nicTxProcessTxDoneEvent(IN struct ADAPTER *prAdapter,
 				"EVENT_ID_TX_DONE WIDX:PID[%u:%u] Status[%u:%s] SN[%u] TID[%u] CNT[%u] Flush[%u]\n",
 				prTxDone->ucWlanIndex, prTxDone->ucPacketSeq,
 				prTxDone->ucStatus,
-				prTxResult,
+				apucTxResultStr[prTxDone->ucStatus],
 				prTxDone->u2SequenceNumber, prTxDone->ucTid,
 				prTxDone->ucTxCount, prTxDone->ucFlushReason);
 
 		if (prTxDone->ucFlag & BIT(TXS_IS_EXIST)) {
-			struct TX_DESC_OPS_T *prTxDescOps =
-				prAdapter->chip_info->prTxDescOps;
 			uint8_t ucNss, ucStbc;
 			int8_t icTxPwr;
 			uint32_t *pu4RawTxs =
 				(uint32_t *)&prTxDone->aucRawTxS[0];
 
-			if (prTxDescOps) {
-				ucNss = (prTxDone->u2TxRate &
-					prTxDescOps->u2TxdFrNstsMask) >>
-					prTxDescOps->ucTxdFrNstsOffset;
-				ucStbc = (prTxDone->u2TxRate &
-					prTxDescOps->u2TxdFrStbcMask) ?
-					TRUE : FALSE;
-			} else {
-				ucNss = (prTxDone->u2TxRate &
-					TX_DESC_NSTS_MASK) >>
-					TX_DESC_NSTS_OFFSET;
-				ucStbc = (prTxDone->u2TxRate & TX_DESC_STBC) ?
-					TRUE : FALSE;
-			}
+			ucNss = (prTxDone->u2TxRate & TX_DESC_NSTS_MASK) >>
+				TX_DESC_NSTS_OFFSET;
 			ucNss += 1;
+			ucStbc = (prTxDone->u2TxRate & TX_DESC_STBC) ?
+								TRUE : FALSE;
 
 			if (ucStbc)
 				ucNss /= 2;
@@ -3639,7 +3439,7 @@ void nicTxProcessTxDoneEvent(IN struct ADAPTER *prAdapter,
 		       "EVENT_ID_TX_DONE WIDX:PID[%u:%u] Status[%u:%s] SN[%u]\n",
 		       prTxDone->ucWlanIndex, prTxDone->ucPacketSeq,
 		       prTxDone->ucStatus,
-		       prTxResult,
+		       apucTxResultStr[prTxDone->ucStatus],
 		       prTxDone->u2SequenceNumber);
 	}
 
@@ -4041,9 +3841,6 @@ void nicTxSetMngPacket(struct ADAPTER *prAdapter,
 		       uint8_t ucRateMode)
 {
 	static uint16_t u2SwSn;
-#if CFG_SUPPORT_NAN
-	struct WLAN_MAC_HEADER *prWifiHdr;
-#endif
 	ASSERT(prMsduInfo);
 
 	prMsduInfo->ucBssIndex = ucBssIndex;
@@ -4066,20 +3863,6 @@ void nicTxSetMngPacket(struct ADAPTER *prAdapter,
 	prMsduInfo->ucPacketType = TX_PACKET_TYPE_MGMT;
 	prMsduInfo->ucUserPriority = 0;
 	prMsduInfo->eSrc = TX_PACKET_MGMT;
-#if CFG_SUPPORT_NAN
-	prWifiHdr =
-		(struct WLAN_MAC_HEADER *)((uint8_t *)(prMsduInfo->prPacket) +
-					       MAC_TX_RESERVED_FIELD);
-
-	if (IS_BMCAST_MAC_ADDR(prWifiHdr->aucAddr1)) {
-		prMsduInfo->ucStaRecIndex = STA_REC_INDEX_BMCAST;
-		if (pfTxDoneHandler != NULL) {
-			prMsduInfo->pfTxDoneHandler = NULL;
-			DBGLOG(TX, WARN,
-			       "TX done handler can't use for BMC case\n");
-		}
-	}
-#endif
 	u2SwSn++;
 	if (u2SwSn > 4095)
 		u2SwSn = 0;
@@ -4172,15 +3955,6 @@ void nicTxSetPktRetryLimit(struct MSDU_INFO *prMsduInfo,
 {
 	prMsduInfo->ucRetryLimit = ucRetryLimit;
 	prMsduInfo->u4Option |= MSDU_OPT_MANUAL_RETRY_LIMIT;
-}
-
-void nicTxSetForceRts(IN struct MSDU_INFO *prMsduInfo,
-				int8_t fgForceRts)
-{
-	if (fgForceRts)
-		prMsduInfo->u4Option |= MSDU_OPT_FORCE_RTS;
-	else
-		prMsduInfo->u4Option &= ~MSDU_OPT_FORCE_RTS;
 }
 
 void nicTxSetPktPowerOffset(struct MSDU_INFO *prMsduInfo,
@@ -5024,13 +4798,6 @@ static uint32_t nicTxDirectStartXmitMain(struct sk_buff
 		}
 
 		nicTxFillDataDesc(prAdapter, prMsduInfo);
-#if CFG_SUPPORT_DROP_INVALID_MSDUINFO
-		/* Drop invalid MsduInfo */
-		if (unlikely(prMsduInfo->fgDrop)) {
-			nicTxDropInvalidMsduInfo(prAdapter, prMsduInfo);
-			return WLAN_STATUS_FAILURE;
-		}
-#endif /* CFG_SUPPORT_DROP_INVALID_MSDUINFO */
 
 		prStaRec = cnmGetStaRecByIndex(prAdapter,
 					       prMsduInfo->ucStaRecIndex);
@@ -5679,14 +5446,17 @@ int32_t nicTxGetVectorInfo(IN char *pcCommand, IN int i4TotalLen,
 				"%s%d_MCS%d, ", stbc ? "NSTS" : "NSS",
 				nsts, rate);
 
-		i4BytesWritten += kalScnprintf(
-			pcCommand + i4BytesWritten,
-			i4TotalLen - i4BytesWritten, "%s, ",
-#if (CFG_SUPPORT_CONNAC2X == 1)
-			txmode == TX_RATE_MODE_HE_ER ?
-			      (frmode > 0 ? "106-RU" : "242-RU") :
-#endif
-			      HW_TX_RATE_BW[frmode < 4 ? (uint8_t)frmode : 4U]);
+		if (txmode == TX_RATE_MODE_HE_ER)
+			i4BytesWritten += kalScnprintf(
+				pcCommand + i4BytesWritten,
+				i4TotalLen - i4BytesWritten, "%s, ",
+				frmode > 0 ? "106-RU" : "242-RU");
+		else
+			i4BytesWritten += kalScnprintf(
+				pcCommand + i4BytesWritten,
+				i4TotalLen - i4BytesWritten, "%s, ",
+				frmode < 4 ? HW_TX_RATE_BW[frmode] :
+				HW_TX_RATE_BW[4]);
 
 		if (txmode == TX_RATE_MODE_CCK)
 			i4BytesWritten += kalScnprintf(
@@ -5717,11 +5487,5 @@ int32_t nicTxGetVectorInfo(IN char *pcCommand, IN int i4TotalLen,
 	}
 
 	return i4BytesWritten;
-}
-
-u_int8_t nicTxIsPrioPackets(IN struct ADAPTER *prAdapter,
-		IN struct MSDU_INFO *prMsduInfo)
-{
-	return prMsduInfo && prMsduInfo->ucTC == TC3_INDEX;
 }
 

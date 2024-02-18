@@ -121,7 +121,7 @@ struct wfdma_ring_info {
  */
 static void halCheckHifState(struct ADAPTER *prAdapter);
 static void halDumpHifDebugLog(struct ADAPTER *prAdapter);
-static bool halIsTxHang(struct ADAPTER *prAdapter, uint32_t *u4Token);
+static bool halIsTxHang(struct ADAPTER *prAdapter);
 
 /*******************************************************************************
  *                              F U N C T I O N S
@@ -140,102 +140,39 @@ void halPrintHifDbgInfo(IN struct ADAPTER *prAdapter)
 		prAdapter->chip_info->dumpwfsyscpupcr(prAdapter);
 }
 
-static bool halIsFwReadyDump(struct ADAPTER *prAdapter)
-{
-	struct CHIP_DBG_OPS *prDbgOps;
-	uint32_t u4Val = 0;
-
-	prDbgOps = prAdapter->chip_info->prDebugOps;
-
-	if (prDbgOps && prDbgOps->getFwDebug)
-		u4Val = prDbgOps->getFwDebug(prAdapter);
-
-	u4Val &= DBG_PLE_INT_FW_READY_MASK;
-
-	return (u4Val == DBG_PLE_INT_FW_READY) || (u4Val == 0);
-}
-
-static void halDumpTxHangLog(struct ADAPTER *prAdapter, uint32_t u4TokenId)
-{
-	struct CHIP_DBG_OPS *prDbgOps;
-	struct MSDU_TOKEN_INFO *prTokenInfo;
-	struct MSDU_TOKEN_ENTRY *prToken;
-	uint32_t u4DebugLevel = 0, u4Val = 0;
-
-	prDbgOps = prAdapter->chip_info->prDebugOps;
-	prTokenInfo = &prAdapter->prGlueInfo->rHifInfo.rTokenInfo;
-	prToken = &prTokenInfo->arToken[u4TokenId];
-	wlanGetDriverDbgLevel(DBG_TX_IDX, &u4DebugLevel);
-
-	/* check fw is dumping log */
-	if (prDbgOps && prDbgOps->getFwDebug)
-		u4Val = prDbgOps->getFwDebug(prAdapter);
-
-	if (u4Val & DBG_PLE_INT_FW_SYNC_MASK) {
-		DBGLOG(HAL, ERROR, "Fw is dumping log. Skip to dump mac log\n");
-		return;
-	}
-
-	if (halIsFwReadyDump(prAdapter)) {
-		if (prDbgOps && prDbgOps->setFwDebug) {
-			/* set drv print log sync flag */
-			prDbgOps->setFwDebug(
-				prAdapter, false, 0, DBG_PLE_INT_DRV_SYNC_MASK);
-		}
-
-		if (prDbgOps && prDbgOps->dumpMacInfo)
-			prDbgOps->dumpMacInfo(prAdapter);
-
-		if (u4DebugLevel & DBG_CLASS_TRACE)
-			haldumpPhyInfo(prAdapter);
-
-		if (prDbgOps && prDbgOps->setFwDebug) {
-			/* clr drv print log sync flag */
-			prDbgOps->setFwDebug(
-				prAdapter, false, DBG_PLE_INT_DRV_SYNC_MASK, 0);
-		}
-	} else {
-		DBGLOG(HAL, ERROR, "Fw not ready to dump log\n");
-	}
-
-	if (prDbgOps && prDbgOps->setFwDebug) {
-		/* trigger tx debug sop */
-		prDbgOps->setFwDebug(
-			prAdapter,
-			true,
-			0xffff,
-			DBG_PLE_INT_TX_MASK |
-			(1 << DBG_PLE_INT_VER_SHIFT) |
-			(prToken->ucBssIndex << DBG_PLE_INT_BAND_BSS_SHIFT)
-			);
-	}
-}
-
 static void halCheckHifState(struct ADAPTER *prAdapter)
 {
-	struct CHIP_DBG_OPS *prDbgOps;
-	uint32_t u4TokenId = 0;
-
-	prDbgOps = prAdapter->chip_info->prDebugOps;
-
+	uint32_t u4DebugLevel = 0;
 	if (prAdapter->u4HifChkFlag & HIF_CHK_TX_HANG) {
-		if (halIsTxHang(prAdapter, &u4TokenId)) {
+		if (halIsTxHang(prAdapter)) {
 			DBGLOG(HAL, ERROR,
 			       "Tx timeout, set hif debug info flag\n");
+			wlanGetDriverDbgLevel(DBG_TX_IDX, &u4DebugLevel);
+			if (u4DebugLevel & DBG_CLASS_TRACE) {
+				DBGLOG(HAL, ERROR, "Set debug flag bit\n");
+				prAdapter->u4HifDbgFlag |= DEG_HIF_ALL;
+			}
+			else {
+				struct CHIP_DBG_OPS *prDbgOps;
 
-			if (prDbgOps && prDbgOps->showPleInfo)
-				prDbgOps->showPleInfo(prAdapter, FALSE);
+				prDbgOps = prAdapter->chip_info->prDebugOps;
+				DBGLOG(HAL, ERROR, "Dump debug info\n");
+				if (prDbgOps && prDbgOps->showPleInfo)
+					prDbgOps->showPleInfo(prAdapter, FALSE);
 
-			if (prDbgOps && prDbgOps->showPseInfo)
-				prDbgOps->showPseInfo(prAdapter);
+				if (prDbgOps && prDbgOps->showPseInfo)
+					prDbgOps->showPseInfo(prAdapter);
 
-			if (prDbgOps && prDbgOps->showPdmaInfo)
-				prDbgOps->showPdmaInfo(prAdapter);
+				if (prDbgOps && prDbgOps->showPdmaInfo)
+					prDbgOps->showPdmaInfo(prAdapter);
 
-			if (prDbgOps && prDbgOps->showDmaschInfo)
-				prDbgOps->showDmaschInfo(prAdapter);
+				if (prDbgOps && prDbgOps->showDmaschInfo)
+					prDbgOps->showDmaschInfo(prAdapter);
 
-			halDumpTxHangLog(prAdapter, u4TokenId);
+				if (prDbgOps && prDbgOps->dumpMacInfo)
+					prDbgOps->dumpMacInfo(prAdapter);
+
+			}
 		}
 	}
 
@@ -436,49 +373,18 @@ uint32_t halDumpHifStatus(IN struct ADAPTER *prAdapter,
  * @retval -1            prTs1 value < prTs2 value
  */
 /*----------------------------------------------------------------------------*/
-int halTimeCompare(struct timespec64 *prTs1, struct timespec64 *prTs2)
+int halTimeCompare(struct timeval *prTs1, struct timeval *prTs2)
 {
 	if (prTs1->tv_sec > prTs2->tv_sec)
 		return 1;
 	else if (prTs1->tv_sec < prTs2->tv_sec)
 		return -1;
 	/* sec part is equal */
-	else if (prTs1->tv_nsec > prTs2->tv_nsec)
+	else if (prTs1->tv_usec > prTs2->tv_usec)
 		return 1;
-	else if (prTs1->tv_nsec < prTs2->tv_nsec)
+	else if (prTs1->tv_usec < prTs2->tv_usec)
 		return -1;
 	return 0;
-}
-
-static void halNotifyTxHangEvent(struct ADAPTER *prAdapter,
-				 struct MSDU_TOKEN_HISTORY_INFO *prHistory)
-{
-	struct TOKEN_HISTORY *prCur, *prNext;
-	uint32_t u4Idx, u4CurIdx, u4NextIdx;
-
-	ASSERT(prAdapter);
-	ASSERT(prHistory);
-
-	u4CurIdx = prHistory->u4CurIdx;
-
-	for (u4Idx = 0; u4Idx < MSDU_TOKEN_HISTORY_NUM - 1; u4Idx++) {
-		u4NextIdx = (u4CurIdx + 1) % MSDU_TOKEN_HISTORY_NUM;
-		prCur = &prHistory->au4List[u4CurIdx];
-		prNext = &prHistory->au4List[u4NextIdx];
-
-		if (prCur->u4LongestId != prNext->u4LongestId)
-			return;
-
-		if (prCur->u4UsedCnt == 0)
-			return;
-
-		if (prCur->u4UsedCnt > prNext->u4UsedCnt)
-			return;
-
-		u4CurIdx = u4NextIdx;
-	}
-
-	kalSendUevent("abnormaltrx=DIR:TX,Event:Hang");
 }
 
 /*----------------------------------------------------------------------------*/
@@ -490,12 +396,11 @@ static void halNotifyTxHangEvent(struct ADAPTER *prAdapter,
  * @retval true          tx is hang because msdu report too long
  */
 /*----------------------------------------------------------------------------*/
-static bool halIsTxHang(struct ADAPTER *prAdapter, uint32_t *u4Token)
+static bool halIsTxHang(struct ADAPTER *prAdapter)
 {
 	struct MSDU_TOKEN_INFO *prTokenInfo;
 	struct MSDU_TOKEN_ENTRY *prToken;
-	struct MSDU_TOKEN_HISTORY_INFO *prHistory;
-	struct timespec64 rNowTs, rTime, rLongest, rTimeout;
+	struct timeval rNowTs, rTime, rLongest, rTimeout;
 	uint32_t u4Idx = 0, u4TokenId = 0;
 	bool fgIsTimeout = false;
 	struct WIFI_VAR *prWifiVar;
@@ -504,14 +409,13 @@ static bool halIsTxHang(struct ADAPTER *prAdapter, uint32_t *u4Token)
 	ASSERT(prAdapter->prGlueInfo);
 
 	prTokenInfo = &prAdapter->prGlueInfo->rHifInfo.rTokenInfo;
-	prHistory = &prTokenInfo->rHistory;
 	prWifiVar = &prAdapter->rWifiVar;
 
 	rTimeout.tv_sec = prWifiVar->ucMsduReportTimeout;
-	rTimeout.tv_nsec = 0;
+	rTimeout.tv_usec = 0;
 	rLongest.tv_sec = 0;
-	rLongest.tv_nsec = 0;
-	ktime_get_ts64(&rNowTs);
+	rLongest.tv_usec = 0;
+	do_gettimeofday(&rNowTs);
 
 	for (u4Idx = 0; u4Idx < HIF_TX_MSDU_TOKEN_NUM; u4Idx++) {
 		prToken = &prTokenInfo->arToken[u4Idx];
@@ -523,12 +427,12 @@ static bool halIsTxHang(struct ADAPTER *prAdapter, uint32_t *u4Token)
 			continue;
 
 		rTime.tv_sec = rNowTs.tv_sec - prToken->rTs.tv_sec;
-		rTime.tv_nsec = rNowTs.tv_nsec;
-		if (prToken->rTs.tv_nsec > rNowTs.tv_nsec) {
+		rTime.tv_usec = rNowTs.tv_usec;
+		if (prToken->rTs.tv_usec > rNowTs.tv_usec) {
 			rTime.tv_sec -= 1;
-			rTime.tv_nsec += SEC_TO_NSEC(1);
+			rTime.tv_usec += SEC_TO_USEC(1);
 		}
-		rTime.tv_nsec -= prToken->rTs.tv_nsec;
+		rTime.tv_usec -= prToken->rTs.tv_usec;
 
 		if (halTimeCompare(&rTime, &rTimeout) >= 0)
 			fgIsTimeout = true;
@@ -536,7 +440,7 @@ static bool halIsTxHang(struct ADAPTER *prAdapter, uint32_t *u4Token)
 		/* rTime > rLongest */
 		if (halTimeCompare(&rTime, &rLongest) > 0) {
 			rLongest.tv_sec = rTime.tv_sec;
-			rLongest.tv_nsec = rTime.tv_nsec;
+			rLongest.tv_usec = rTime.tv_usec;
 			u4TokenId = u4Idx;
 		}
 	}
@@ -549,17 +453,7 @@ static bool halIsTxHang(struct ADAPTER *prAdapter, uint32_t *u4Token)
 				rLongest.tv_sec);
 		if (prToken->prPacket)
 			DBGLOG_MEM32(HAL, INFO, prToken->prPacket, 64);
-		prHistory->au4List[prHistory->u4CurIdx].u4LongestId = u4TokenId;
-		prHistory->au4List[prHistory->u4CurIdx].u4UsedCnt =
-			prTokenInfo->u4UsedCnt;
-		prHistory->u4CurIdx =
-			(prHistory->u4CurIdx + 1) % MSDU_TOKEN_HISTORY_NUM;
-		halNotifyTxHangEvent(prAdapter, prHistory);
-	} else {
-		kalMemZero(prHistory, sizeof(struct MSDU_TOKEN_HISTORY_INFO));
 	}
-
-	*u4Token = u4TokenId;
 
 	return fgIsTimeout;
 }
@@ -596,7 +490,7 @@ void kalDumpTxRing(struct GLUE_INFO *prGlueInfo,
 	DBGLOG(HAL, INFO, "Tx Contents\n");
 	if (prMemOps->dumpTx)
 		prMemOps->dumpTx(prHifInfo, prTxRing, u4Num, u4DumpLen);
-	DBGLOG(HAL, INFO, "\n");
+	DBGLOG(HAL, INFO, "\n\n");
 }
 
 void kalDumpRxRing(struct GLUE_INFO *prGlueInfo,
@@ -634,7 +528,7 @@ void kalDumpRxRing(struct GLUE_INFO *prGlueInfo,
 	DBGLOG(HAL, INFO, "Rx Contents\n");
 	if (prMemOps->dumpRx)
 		prMemOps->dumpRx(prHifInfo, prRxRing, u4Num, u4DumpLen);
-	DBGLOG(HAL, INFO, "\n");
+	DBGLOG(HAL, INFO, "\n\n");
 }
 
 void halShowPdmaInfo(IN struct ADAPTER *prAdapter)
@@ -651,19 +545,21 @@ void halShowPdmaInfo(IN struct ADAPTER *prAdapter)
 	struct wfdma_ring_info wfmda_tx_group[] = {
 		{"AP DATA0", prBus_info->tx_ring0_data_idx, true},
 		{"AP DATA1", prBus_info->tx_ring1_data_idx, true},
-		{"AP DATA2", prBus_info->tx_ring2_data_idx, true},
 		{"AP CMD", prBus_info->tx_ring_cmd_idx, true},
 		{"FWDL", prBus_info->tx_ring_fwdl_idx, true},
+#if CFG_MTK_MCIF_WIFI_SUPPORT
 		{"MD DATA0", 8, false},
 		{"MD DATA1", 9, false},
-		{"MD DATA2", 10, false},
 		{"MD CMD", 14, false},
+#endif
 	};
 	struct wfdma_ring_info wfmda_rx_group[] = {
 		{"AP DATA", 0, true},
 		{"AP EVENT", 1, true},
+#if CFG_MTK_MCIF_WIFI_SUPPORT
 		{"MD DATA", 2, false},
 		{"MD EVENT", 3, false},
+#endif
 	};
 
 	buf = (char *) kalMemAlloc(BUF_SIZE, VIR_MEM_TYPE);
@@ -686,21 +582,23 @@ void halShowPdmaInfo(IN struct ADAPTER *prAdapter)
 	DBGLOG(HAL, INFO, "WPDMA MCU2HOST_SW_INT_STA:0x%08x = 0x%08x\n",
 		MCU2HOST_SW_INT_STA, u4Value);
 
+#if CFG_MTK_MCIF_WIFI_SUPPORT
 	HAL_MCR_RD(prAdapter, MD_INT_STA, &u4Value);
 	DBGLOG(HAL, INFO, "MD_INT_STA:0x%08x = 0x%08x\n",
-	       MD_INT_STA, u4Value);
+		MD_INT_STA, u4Value);
 	HAL_MCR_RD(prAdapter, MD_WPDMA_GLO_CFG, &u4Value);
 	DBGLOG(HAL, INFO, "MD_WPDMA_GLO_CFG:0x%08x = 0x%08x\n",
-	       MD_WPDMA_GLO_CFG, u4Value);
+		MD_WPDMA_GLO_CFG, u4Value);
 	HAL_MCR_RD(prAdapter, MD_INT_ENA, &u4Value);
 	DBGLOG(HAL, INFO, "MD_INT_ENA:0x%08x = 0x%08x\n",
-	       MD_INT_ENA, u4Value);
+		MD_INT_ENA, u4Value);
 	HAL_MCR_RD(prAdapter, MD_WPDMA_DLY_INIT_CFG, &u4Value);
 	DBGLOG(HAL, INFO, "MD_WPDMA_DLY_INIT_CFG:0x%08x = 0x%08x\n",
-	       MD_WPDMA_DLY_INIT_CFG, u4Value);
+		MD_WPDMA_DLY_INIT_CFG, u4Value);
 	HAL_MCR_RD(prAdapter, MD_WPDMA_MISC, &u4Value);
 	DBGLOG(HAL, INFO, "MD_WPDMA_MISC:0x%08x = 0x%08x\n",
-	       MD_WPDMA_MISC, u4Value);
+		MD_WPDMA_MISC, u4Value);
+#endif
 
 	/* PDMA Tx/Rx Ring  Info */
 	DBGLOG(HAL, INFO, "Tx Ring configuration\n");
@@ -709,7 +607,8 @@ void halShowPdmaInfo(IN struct ADAPTER *prAdapter)
 
 	if (buf) {
 		kalMemZero(buf, BUF_SIZE);
-		for (i = 0; i < ARRAY_SIZE(wfmda_tx_group); i++) {
+		for (i = 0; i < sizeof(wfmda_tx_group) /
+				sizeof(struct wfdma_ring_info); i++) {
 			int ret;
 
 			offset = wfmda_tx_group[i].ring_idx *
@@ -752,7 +651,8 @@ void halShowPdmaInfo(IN struct ADAPTER *prAdapter)
 			"Rx Ring", "Idx", "Reg", "Base", "Cnt", "CIDX", "DIDX");
 
 		kalMemZero(buf, BUF_SIZE);
-		for (i = 0; i < ARRAY_SIZE(wfmda_rx_group); i++) {
+		for (i = 0; i < sizeof(wfmda_rx_group) /
+				sizeof(struct wfdma_ring_info); i++) {
 			int ret;
 
 			offset = wfmda_rx_group[i].ring_idx * MT_RINGREG_DIFF;
@@ -793,7 +693,8 @@ void halShowPdmaInfo(IN struct ADAPTER *prAdapter)
 	/* PDMA Tx/Rx descriptor & packet content */
 	prHifInfo = &prAdapter->prGlueInfo->rHifInfo;
 
-	for (i = 0; i < ARRAY_SIZE(wfmda_tx_group); i++) {
+	for (i = 0; i < sizeof(wfmda_tx_group) /
+			sizeof(struct wfdma_ring_info); i++) {
 		if (!wfmda_tx_group[i].dump_ring_content)
 			continue;
 		DBGLOG(HAL, INFO, "Dump PDMA Tx Ring[%u]\n",
@@ -809,7 +710,8 @@ void halShowPdmaInfo(IN struct ADAPTER *prAdapter)
 			      SwIdx, true);
 	}
 
-	for (i = 0; i < ARRAY_SIZE(wfmda_rx_group); i++) {
+	for (i = 0; i < sizeof(wfmda_rx_group) /
+			sizeof(struct wfdma_ring_info); i++) {
 		if (!wfmda_rx_group[i].dump_ring_content)
 			continue;
 		DBGLOG(HAL, INFO, "Dump PDMA Rx Ring[%u]\n",
@@ -959,21 +861,17 @@ bool halShowHostCsrInfo(IN struct ADAPTER *prAdapter)
 		HOST_CSR_AP2CONN_AHB_HADDR, u4Value);
 #endif
 
-	HAL_MCR_RD(prAdapter, HOST_CSR_CONN_HIF_ON_MD_LPCTL_ADDR,
-		   &u4Value);
-	DBGLOG(HAL, INFO,
-	       "CONN_HIF_ON_MD_LPCTL_ADDR: 0x%08x = 0x%08x\n",
-	       HOST_CSR_CONN_HIF_ON_MD_LPCTL_ADDR, u4Value);
-	HAL_MCR_RD(prAdapter, HOST_CSR_CONN_HIF_ON_MD_IRQ_STAT_ADDR,
-		   &u4Value);
-	DBGLOG(HAL, INFO,
-	       "CONN_HIF_ON_MD_IRQ_STAT_ADDR: 0x%08x = 0x%08x\n",
-	       HOST_CSR_CONN_HIF_ON_MD_IRQ_STAT_ADDR, u4Value);
-	HAL_MCR_RD(prAdapter, HOST_CSR_CONN_HIF_ON_MD_IRQ_ENA_ADDR,
-		   &u4Value);
-	DBGLOG(HAL, INFO,
-	       "CONN_HIF_ON_MD_IRQ_ENA_ADDR: 0x%08x = 0x%08x\n",
-	       HOST_CSR_CONN_HIF_ON_MD_IRQ_ENA_ADDR, u4Value);
+#if CFG_MTK_MCIF_WIFI_SUPPORT
+	HAL_MCR_RD(prAdapter, HOST_CSR_CONN_HIF_ON_MD_LPCTL_ADDR, &u4Value);
+	DBGLOG(HAL, INFO, "CONN_HIF_ON_MD_LPCTL_ADDR: 0x%08x = 0x%08x\n",
+		HOST_CSR_CONN_HIF_ON_MD_LPCTL_ADDR, u4Value);
+	HAL_MCR_RD(prAdapter, HOST_CSR_CONN_HIF_ON_MD_IRQ_STAT_ADDR, &u4Value);
+	DBGLOG(HAL, INFO, "CONN_HIF_ON_MD_IRQ_STAT_ADDR: 0x%08x = 0x%08x\n",
+		HOST_CSR_CONN_HIF_ON_MD_IRQ_STAT_ADDR, u4Value);
+	HAL_MCR_RD(prAdapter, HOST_CSR_CONN_HIF_ON_MD_IRQ_ENA_ADDR, &u4Value);
+	DBGLOG(HAL, INFO, "CONN_HIF_ON_MD_IRQ_ENA_ADDR: 0x%08x = 0x%08x\n",
+		HOST_CSR_CONN_HIF_ON_MD_IRQ_ENA_ADDR, u4Value);
+#endif
 
 	HAL_MCR_WR(prAdapter, HOST_CSR_DRIVER_OWN_INFO, 0x00030000);
 	kalUdelay(1);
@@ -989,9 +887,24 @@ bool halShowHostCsrInfo(IN struct ADAPTER *prAdapter)
 
 void haldumpPhyInfo(struct ADAPTER *prAdapter)
 {
-	uint32_t i = 0, value = 0;
+	uint32_t i = 0, value = 0, addr;
 
 	for (i = 0; i < 20; i++) {
+		HAL_MCR_RD(prAdapter, 0x81021104, &value);
+		value = (value & 0x3FFFFFF) | 0x80000000;
+		HAL_MCR_WR(prAdapter, 0x81021104, value);
+		for (addr = 0x81021100; addr <= 0x8102110C; addr += 4) {
+			HAL_MCR_RD(prAdapter, addr, &value);
+			DBGLOG(HAL, INFO, "0x%08x: 0x%08x\n", addr, value);
+		}
+		addr = 0x81021114;
+		HAL_MCR_RD(prAdapter, addr, &value);
+		DBGLOG(HAL, INFO, "0x%08x: 0x%08x\n", addr, value);
+		for (addr = 0x80023000; addr <= 0x8002300C; addr += 4) {
+			HAL_MCR_RD(prAdapter, addr, &value);
+			DBGLOG(HAL, INFO, "0x%08x: 0x%08x\n", addr, value);
+		}
+
 		HAL_MCR_RD(prAdapter, 0x82072644, &value);
 		DBGLOG(HAL, INFO, "0x82072644: 0x%08x\n", value);
 		HAL_MCR_RD(prAdapter, 0x82072654, &value);

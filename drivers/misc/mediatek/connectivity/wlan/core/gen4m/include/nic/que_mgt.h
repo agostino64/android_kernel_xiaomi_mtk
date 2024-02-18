@@ -362,7 +362,6 @@ struct RX_BA_ENTRY {
 	uint16_t u2WinSize;
 	uint16_t u2BarSSN;
 	uint16_t u2LastRcvdSN;
-	uint16_t u2LastFallBehindDropSN;
 
 	/* For identifying the RX BA agreement */
 	uint8_t ucStaRecIdx;
@@ -751,14 +750,12 @@ struct _CMD_MQM_UPDATE_MU_EDCA_PARMS_T {
 
 struct CMD_TX_AMPDU {
 	u_int8_t fgEnable;
-	u_int8_t fgApply;
-	uint8_t aucReserved[2];
+	uint8_t aucReserved[3];
 };
 
 struct CMD_ADDBA_REJECT {
 	u_int8_t fgEnable;
-	u_int8_t fgApply;
-	uint8_t aucReserved[2];
+	uint8_t aucReserved[3];
 };
 
 #if CFG_M0VE_BA_TO_DRIVER
@@ -987,11 +984,6 @@ uint32_t qmDequeueTxPacketsFromGlobalQueue(IN struct ADAPTER
 	IN uint32_t
 	*prPleCurrentQuota, IN uint32_t u4TotalQuota);
 
-#if CFG_SUPPORT_NAN
-void qmUpdateFreeNANQouta(IN struct ADAPTER *prAdapter,
-			  struct EVENT_UPDATE_NAN_TX_STATUS *prTxStatus);
-#endif
-
 void qmSetStaRecTxAllowed(IN struct ADAPTER *prAdapter,
 	IN struct STA_RECORD *prStaRec, IN u_int8_t fgIsTxAllowed);
 
@@ -1027,10 +1019,6 @@ void qmProcessPktWithReordering(IN struct ADAPTER
 
 void qmProcessBarFrame(IN struct ADAPTER *prAdapter,
 	IN struct SW_RFB *prSwRfb, OUT struct QUE *prReturnedQue);
-
-void qmHandleRxReorderWinShift(IN struct ADAPTER *prAdapter,
-	IN uint8_t ucStaRecIdx, uint8_t ucTid, uint32_t u4SSN,
-	OUT struct QUE *prReturnedQue);
 
 void qmInsertReorderPkt(IN struct ADAPTER *prAdapter,
 			IN struct SW_RFB *prSwRfb,
@@ -1261,9 +1249,8 @@ void qmMoveStaTxQueue(struct STA_RECORD *prSrcStaRec,
 void qmHandleDelTspec(struct ADAPTER *prAdapter, struct STA_RECORD *prStaRec,
 		      enum ENUM_ACI eAci);
 void qmReleaseCHAtFinishedDhcp(struct ADAPTER *prAdapter,
+			       struct TIMER *prTimer,
 			       uint8_t ucBssIndex);
-void qmCheckRxEAPOLM3(IN struct ADAPTER *prAdapter,
-			IN struct SW_RFB *prSwRfb, uint8_t ucBssIndex);
 /*******************************************************************************
  *                              F U N C T I O N S
  *******************************************************************************

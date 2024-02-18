@@ -121,7 +121,7 @@ void soc2_1x1ConstructFirmwarePrio(struct GLUE_INFO *prGlueInfo,
 	uint8_t aucFlavor[2] = {0};
 	int ret = 0;
 
-	kalGetFwFlavor(prGlueInfo->prAdapter, &aucFlavor[0]);
+	kalGetFwFlavor(&aucFlavor[0]);
 	for (ucIdx = 0; apucSoc2_1x1FwName[ucIdx]; ucIdx++) {
 		if ((*pucNameIdx + 3) >= ucMaxNameIdx) {
 			/* the table is not large enough */
@@ -315,9 +315,6 @@ struct CHIP_DBG_OPS soc2_1x1_debug_ops = {
 	.showCsrInfo = halShowHostCsrInfo,
 	.showDmaschInfo = halShowDmaschInfo,
 	.dumpMacInfo = haldumpMacInfo,
-	.dumpTxdInfo = halDumpTxdInfo,
-	.getFwDebug = halGetPleInt,
-	.setFwDebug = halSetPleInt,
 	.showHifInfo = soc2_1x1ShowHifInfo,
 #else
 	.showPdmaInfo = NULL,
@@ -327,15 +324,11 @@ struct CHIP_DBG_OPS soc2_1x1_debug_ops = {
 	.showCsrInfo = NULL,
 	.showDmaschInfo = NULL,
 	.dumpMacInfo = NULL,
-	.dumpTxdInfo = NULL,
 	.showHifInfo = NULL,
 #endif
 	.showWtblInfo = NULL,
 	.printHifDbgInfo = halPrintHifDbgInfo,
 	.show_stat_info = halShowStatInfo,
-#ifdef CFG_SUPPORT_LINK_QUALITY_MONITOR
-	.get_rx_rate_info = connac_get_rx_rate_info,
-#endif
 };
 
 struct mt66xx_chip_info mt66xx_chip_info_soc2_1x1 = {

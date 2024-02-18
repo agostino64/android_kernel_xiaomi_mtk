@@ -187,8 +187,6 @@ extern u_int8_t fgIsBusAccessFailed;
 /* for non-wfa vendor specific IE buffer */
 #define NON_WFA_VENDOR_IE_MAX_LEN	(128)
 
-#define FW_LOG_CMD_ON_OFF		0
-#define FW_LOG_CMD_SET_LEVEL		1
 
 /*******************************************************************************
  *                    E X T E R N A L   R E F E R E N C E S
@@ -244,13 +242,6 @@ extern u_int8_t fgIsBusAccessFailed;
 #define GLUE_FLAG_NOTIFY_MD_CRASH_BIT		(18)
 #define GLUE_FLAG_DRV_INT_BIT			(19)
 
-#if (CFG_SUPPORT_POWER_THROTTLING == 1)
-#define GLUE_FLAG_CNS_PWR_LEVEL_BIT		(21)
-#define GLUE_FLAG_CNS_PWR_TEMP_BIT		(22)
-#define GLUE_FLAG_CNS_PWR_LEVEL			BIT(21)
-#define GLUE_FLAG_CNS_PWR_TEMP			BIT(22)
-#endif
-
 #if CFG_ENABLE_BT_OVER_WIFI
 #define GLUE_BOW_KFIFO_DEPTH        (1024)
 /* #define GLUE_BOW_DEVICE_NAME        "MT6620 802.11 AMP" */
@@ -281,7 +272,6 @@ struct GL_WPA_INFO {
 	uint32_t u4Mfp;
 	uint8_t ucRSNMfpCap;
 #endif
-	uint16_t u2RSNXCap;
 };
 
 #if CFG_SUPPORT_REPLAY_DETECTION
@@ -862,10 +852,7 @@ struct NL80211_DRIVER_STRING_CMD_PARAMS {
 	struct NL80211_DRIVER_TEST_MODE_PARAMS hdr;
 	uint32_t reply_buf_size;
 	uint32_t reply_len;
-	union _reply_buf {
-		uint8_t *ptr;
-		uint64_t data;
-	} reply_buf;
+	uint8_t *reply_buf;
 };
 
 /*SW CMD */
@@ -948,12 +935,6 @@ struct PACKET_PRIVATE_DATA {
 struct PACKET_PRIVATE_RX_DATA {
 	uint64_t u8IntTime;	/* 8byte */
 	uint64_t u8RxTime;	/* 8byte */
-};
-
-struct CMD_CONNSYS_FW_LOG {
-	int32_t fgCmd;
-	int32_t fgValue;
-	u_int8_t fgEarlySet;
 };
 
 /*******************************************************************************
@@ -1244,16 +1225,6 @@ extern int glUnregisterEarlySuspend(struct early_suspend
 				    *prDesc);
 #endif
 
-extern const uint8_t *kalFindIeMatchMask(uint8_t eid,
-				const uint8_t *ies, int len,
-				const uint8_t *match,
-				int match_len, int match_offset,
-				const uint8_t *match_mask);
-
-extern const uint8_t *kalFindIeExtIE(uint8_t eid,
-				uint8_t exteid,
-				const uint8_t *ies, int len);
-
 #if CFG_MET_PACKET_TRACE_SUPPORT
 #ifdef CFG_REMIND_IMPLEMENT
 #define kalMetTagPacket(_prGlueInfo, _prPacket, _eTag) \
@@ -1277,13 +1248,12 @@ void wlanUpdateChannelTable(struct GLUE_INFO *prGlueInfo);
 #ifdef CFG_REMIND_IMPLEMENT
 #define wlanUpdateDfsChannelTable(_prGlueInfo, \
 		_ucRoleIdx, _ucChannel, _ucBandWidth, \
-		_eBssSCO, _u4CenterFreq, _eBand) \
+		_eBssSCO, _u4CenterFreq) \
 	KAL_NEED_IMPLEMENT(__FILE__, __func__, __LINE__)
 #else
 void wlanUpdateDfsChannelTable(struct GLUE_INFO *prGlueInfo,
 		uint8_t ucRoleIdx, uint8_t ucChannel, uint8_t ucBandWidth,
-		enum ENUM_CHNL_EXT eBssSCO, uint32_t u4CenterFreq,
-		enum ENUM_BAND eBand);
+		enum ENUM_CHNL_EXT eBssSCO, uint32_t u4CenterFreq);
 #endif
 #endif
 

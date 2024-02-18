@@ -201,23 +201,30 @@ saaFsmSteps(IN struct ADAPTER *prAdapter,
 
 			/* Only trigger this event once */
 			if (ePreviousState != prStaRec->eAuthAssocState) {
-				uint32_t status =
-					prStaRec->u2StatusCode ==
-					STATUS_CODE_SUCCESSFUL &&
-					prRetainedSwRfb ?
-					WLAN_STATUS_SUCCESS :
-					WLAN_STATUS_FAILURE;
-				uint32_t result = saaFsmSendEventJoinComplete(
-						prAdapter, status, prStaRec,
-						prRetainedSwRfb);
 
-				if (result != WLAN_STATUS_SUCCESS) {
-					if (status == WLAN_STATUS_SUCCESS ||
-					    result == WLAN_STATUS_RESOURCES) {
+				if (prRetainedSwRfb) {
+					if (saaFsmSendEventJoinComplete(
+						prAdapter,
+						WLAN_STATUS_SUCCESS,
+						prStaRec,
+						prRetainedSwRfb) ==
+						WLAN_STATUS_SUCCESS) {
+						/* ToDo:: Nothing */
+					} else {
+						eNextState = AA_STATE_RESOURCE;
+						fgIsTransition = TRUE;
+					}
+				} else {
+					if (saaFsmSendEventJoinComplete(
+						prAdapter,
+						WLAN_STATUS_FAILURE,
+						prStaRec, NULL) ==
+						WLAN_STATUS_RESOURCES) {
 						eNextState = AA_STATE_RESOURCE;
 						fgIsTransition = TRUE;
 					}
 				}
+
 			}
 
 			/* Free allocated TCM memory */
@@ -699,6 +706,11 @@ saaFsmRunEventTxDone(IN struct ADAPTER *prAdapter,
 		       "EVENT-TX DONE [status: %d][seq: %d]: Current Time = %d\n",
 		       rTxDoneStatus, prMsduInfo->ucTxSeqNum, kalGetTimeTick());
 
+	/* Trigger statistics log if Auth/Assoc Tx failed */
+	if (rTxDoneStatus != TX_RESULT_SUCCESS)
+		wlanTriggerStatsLog(prAdapter,
+				    prAdapter->rWifiVar.u4StatsLogDuration);
+
 	eNextState = prStaRec->eAuthAssocState;
 
 	switch (prStaRec->eAuthAssocState) {
@@ -837,10 +849,9 @@ void saaFsmRunEventTxReqTimeOut(IN struct ADAPTER *prAdapter,
 
 	DBGLOG(SAA, LOUD, "EVENT-TIMER: TX REQ TIMEOUT, Current Time = %d\n",
 	       kalGetTimeTick());
-/* fos_change begin */
-#if CFG_SUPPORT_EXCEPTION_STATISTICS
-		prAdapter->total_mgmtTX_timeout_count++;
-#endif /* fos_change end */
+
+	/* Trigger statistics log if Auth/Assoc Tx timeout */
+	wlanTriggerStatsLog(prAdapter, prAdapter->rWifiVar.u4StatsLogDuration);
 
 	switch (prStaRec->eAuthAssocState) {
 	case SAA_STATE_SEND_AUTH1:
@@ -875,11 +886,6 @@ void saaFsmRunEventRxRespTimeOut(IN struct ADAPTER *prAdapter,
 
 	if (!prStaRec)
 		return;
-
-/* fos_change begin */
-#if CFG_SUPPORT_EXCEPTION_STATISTICS
-		prAdapter->total_mgmtRX_timeout_count++;
-#endif /* fos_change end */
 
 	eNextState = prStaRec->eAuthAssocState;
 
@@ -1094,8 +1100,8 @@ void saaFsmRunEventRxAuth(IN struct ADAPTER *prAdapter,
 				prStaRec->u2StatusCode = u2StatusCode;
 			}
 		}
-		kalIndicateRxMgmtFrame(prAdapter, prAdapter->prGlueInfo,
-				prSwRfb, prStaRec->ucBssIndex);
+		kalIndicateRxMgmtFrame(prAdapter->prGlueInfo, prSwRfb,
+				       prStaRec->ucBssIndex);
 		break;
 
 	default:
@@ -1152,7 +1158,6 @@ uint32_t saaFsmRunEventRxAssoc(IN struct ADAPTER *prAdapter,
 
 			/* Record the Status Code of Authentication Request */
 			prStaRec->u2StatusCode = u2StatusCode;
-			prRetainedSwRfb = prSwRfb;
 
 			if (u2StatusCode == STATUS_CODE_SUCCESSFUL) {
 
@@ -1168,6 +1173,8 @@ uint32_t saaFsmRunEventRxAssoc(IN struct ADAPTER *prAdapter,
 
 				/* Clear history. */
 				prStaRec->ucJoinFailureCount = 0;
+
+				prRetainedSwRfb = prSwRfb;
 				rStatus = WLAN_STATUS_PENDING;
 			} else {
 				cnmStaRecChangeState(prAdapter, prStaRec,
@@ -1250,8 +1257,6 @@ uint32_t saaFsmRunEventRxDeauth(IN struct ADAPTER *prAdapter,
 
 		if (IS_STA_IN_AIS(prStaRec)) {
 			struct BSS_INFO *prAisBssInfo;
-			struct AIS_FSM_INFO *prAisFsmInfo;
-			struct BSS_DESC *prBssDesc;
 			uint8_t ucBssIndex = 0;
 
 			if (!IS_AP_STA(prStaRec))
@@ -1259,19 +1264,8 @@ uint32_t saaFsmRunEventRxDeauth(IN struct ADAPTER *prAdapter,
 
 			ucBssIndex = prStaRec->ucBssIndex;
 
-			prAisBssInfo = aisGetAisBssInfo(prAdapter, ucBssIndex);
-			prAisFsmInfo = aisGetAisFsmInfo(prAdapter, ucBssIndex);
-			prBssDesc = prAisFsmInfo->prTargetBssDesc;
-
-			if (prBssDesc && UNEQUAL_MAC_ADDR(prBssDesc->aucBSSID,
-				prDeauthFrame->aucSrcAddr)) {
-				DBGLOG(SAA, WARN,
-					"Received a Deauth[" MACSTR
-					"] unmatch target[" MACSTR "]\n",
-					MAC2STR(prDeauthFrame->aucSrcAddr),
-					MAC2STR(prBssDesc->aucBSSID));
-				break;
-			}
+			prAisBssInfo = aisGetAisBssInfo(prAdapter,
+				ucBssIndex);
 
 			/* if state != CONNECTED, don't do disconnect again */
 			if (kalGetMediaStateIndicated(prAdapter->prGlueInfo,
@@ -1320,7 +1314,6 @@ uint32_t saaFsmRunEventRxDeauth(IN struct ADAPTER *prAdapter,
 						return WLAN_STATUS_SUCCESS;
 					}
 #endif
-
 					saaSendDisconnectMsgHandler(prAdapter,
 					      prStaRec,
 					      prAisBssInfo,
@@ -1340,14 +1333,6 @@ uint32_t saaFsmRunEventRxDeauth(IN struct ADAPTER *prAdapter,
 #if CFG_ENABLE_BT_OVER_WIFI
 		else if (IS_STA_BOW_TYPE(prStaRec))
 			bowRunEventRxDeAuth(prAdapter, prStaRec, prSwRfb);
-#endif
-#if CFG_SUPPORT_NAN
-		else if (IS_STA_NAN_TYPE(prStaRec)) {
-			DBGLOG(SAA, WARN,
-			       "Received a Deauth: wlanIdx[%d] from NAN network\n",
-			       ucWlanIdx);
-			break;
-		}
 #endif
 		else
 			ASSERT(0);
@@ -1491,8 +1476,6 @@ uint32_t saaFsmRunEventRxDisassoc(IN struct ADAPTER *prAdapter,
 
 		if (IS_STA_IN_AIS(prStaRec)) {
 			struct BSS_INFO *prAisBssInfo;
-			struct AIS_FSM_INFO *prAisFsmInfo;
-			struct BSS_DESC *prBssDesc;
 			uint8_t ucBssIndex = 0;
 
 			if (!IS_AP_STA(prStaRec))
@@ -1500,19 +1483,8 @@ uint32_t saaFsmRunEventRxDisassoc(IN struct ADAPTER *prAdapter,
 
 			ucBssIndex = prStaRec->ucBssIndex;
 
-			prAisBssInfo = aisGetAisBssInfo(prAdapter, ucBssIndex);
-			prAisFsmInfo = aisGetAisFsmInfo(prAdapter, ucBssIndex);
-			prBssDesc = prAisFsmInfo->prTargetBssDesc;
-
-			if (prBssDesc && UNEQUAL_MAC_ADDR(prBssDesc->aucBSSID,
-				prDisassocFrame->aucSrcAddr)) {
-				DBGLOG(SAA, WARN,
-					"Received a DisAssoc[" MACSTR
-					"] unmatch target[" MACSTR "]\n",
-					MAC2STR(prDisassocFrame->aucSrcAddr),
-					MAC2STR(prBssDesc->aucBSSID));
-				break;
-			}
+			prAisBssInfo = aisGetAisBssInfo(prAdapter,
+				ucBssIndex);
 
 			if (prStaRec->ucStaState > STA_STATE_1) {
 
@@ -1560,14 +1532,6 @@ uint32_t saaFsmRunEventRxDisassoc(IN struct ADAPTER *prAdapter,
 						return WLAN_STATUS_SUCCESS;
 					}
 #endif
-					/* fos_change begin */
-#if CFG_SUPPORT_EXCEPTION_STATISTICS
-					prAdapter->total_deauth_rx_count++;
-					if (prStaRec->u2ReasonCode <=
-						REASON_CODE_BEACON_TIMEOUT)
-						prAdapter->deauth_rx_count
-						[prStaRec->u2ReasonCode]++;
-#endif /* fos_change end */
 					saaSendDisconnectMsgHandler(prAdapter,
 					      prStaRec,
 					      prAisBssInfo,

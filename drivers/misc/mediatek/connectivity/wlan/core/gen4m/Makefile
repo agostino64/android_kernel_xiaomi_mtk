@@ -26,6 +26,7 @@ endif
 # ---------------------------------------------------
 # ALPS Setting
 # ---------------------------------------------------
+
 ifeq ($(KBUILD_MODPOST_FAIL_ON_WARNINGS),)
     # Force build fail on modpost warning
     KBUILD_MODPOST_FAIL_ON_WARNINGS=y
@@ -408,8 +409,15 @@ VERSION := $(shell echo "$$(( $X * 65536 + $Y * 256 + $Z))" )
 ccflags-y += -DCFG_CFG80211_VERSION=$(VERSION)
 endif
 
-ccflags-y += -DCFG_SUPPORT_PASSPOINT=1
-ccflags-y += -DCFG_HS20_DEBUG=1
+ifeq ($(CONFIG_MTK_PASSPOINT_R2_SUPPORT), y)
+    ccflags-y += -DCFG_SUPPORT_PASSPOINT=1
+    ccflags-y += -DCFG_HS20_DEBUG=1
+    ccflags-y += -DCFG_ENABLE_GTK_FRAME_FILTER=1
+else
+    ccflags-y += -DCFG_SUPPORT_PASSPOINT=0
+    ccflags-y += -DCFG_HS20_DEBUG=0
+    ccflags-y += -DCFG_ENABLE_GTK_FRAME_FILTER=0
+endif
 
 MTK_MET_PROFILING_SUPPORT = yes
 ifeq ($(MTK_MET_PROFILING_SUPPORT), yes)
@@ -558,7 +566,6 @@ HIF_DIR	    := os/$(os)/hif/none/
 endif
 NIC_DIR     := nic/
 MGMT_DIR    := mgmt/
-NAN_DIR     := nan/
 CHIPS       := chips/
 CHIPS_CMM   := $(CHIPS)common/
 
@@ -645,9 +652,6 @@ MGMT_OBJS := 	$(MGMT_DIR)ais_fsm.o \
 		$(MGMT_DIR)ap_selection.o \
 		$(MGMT_DIR)wmm.o \
 		$(MGMT_DIR)mddp.o \
-		$(MGMT_DIR)thrm.o \
-		$(MGMT_DIR)mscs.o \
-		$(MGMT_DIR)ie_sort.o \
 
 # ---------------------------------------------------
 # Chips Objects List
@@ -744,49 +748,6 @@ MGMT_OBJS += $(MGMT_DIR)p2p_dev_fsm.o\
 MGMT_OBJS += $(MGMT_DIR)wapi.o
 
 # ---------------------------------------------------
-# NAN Objects List
-# ---------------------------------------------------
-ifeq ($(CONFIG_MTK_WIFI_NAN), y)
-OS_OBJS  += $(OS_DIR)gl_nan.o \
-            $(OS_DIR)gl_vendor_nan.o \
-            $(OS_DIR)gl_vendor_ndp.o
-NAN_OBJS := $(NAN_DIR)nan_dev.o \
-            $(NAN_DIR)nanDiscovery.o\
-            $(NAN_DIR)nanScheduler.o\
-            $(NAN_DIR)nanReg.o\
-            $(NAN_DIR)nan_data_engine.o\
-            $(NAN_DIR)nan_data_engine_util.o\
-            $(NAN_DIR)nan_ranging.o\
-            $(NAN_DIR)nan_txm.o
-
-NAN_SEC_OBJS := $(NAN_DIR)nan_sec.o\
-                $(NAN_DIR)wpa_supp/FourWayHandShake.o\
-                $(NAN_DIR)wpa_supp/src/ap/wpa_auth.o\
-                $(NAN_DIR)wpa_supp/src/crypto/sha1.o\
-                $(NAN_DIR)wpa_supp/src/crypto/sha1-internal.o\
-                $(NAN_DIR)wpa_supp/src/crypto/sha1-prf.o\
-                $(NAN_DIR)wpa_supp/src/common/wpa_common.o\
-                $(NAN_DIR)wpa_supp/src/crypto/aes-wrap.o\
-                $(NAN_DIR)wpa_supp/src/crypto/aes-internal.o\
-                $(NAN_DIR)wpa_supp/src/utils/common.o\
-                $(NAN_DIR)wpa_supp/src/rsn_supp/wpa.o\
-                $(NAN_DIR)wpa_supp/src/crypto/aes-unwrap.o\
-                $(NAN_DIR)wpa_supp/src/crypto/aes-internal-enc.o\
-                $(NAN_DIR)wpa_supp/src/crypto/aes-internal-dec.o\
-                $(NAN_DIR)wpa_supp/src/crypto/sha256.o\
-                $(NAN_DIR)wpa_supp/src/crypto/sha256-prf.o\
-                $(NAN_DIR)wpa_supp/src/crypto/sha256-internal.o\
-                $(NAN_DIR)wpa_supp/wpa_supplicant/wpas_glue.o\
-                $(NAN_DIR)wpa_supp/wpa_supplicant/wpa_supplicant.o\
-                $(NAN_DIR)wpa_supp/src/ap/wpa_auth_glue.o\
-                $(NAN_DIR)wpa_supp/src/crypto/pbkdf2-sha256.o\
-                $(NAN_DIR)wpa_supp/src/crypto/sha384-internal.o\
-                $(NAN_DIR)wpa_supp/src/crypto/sha512-internal.o\
-                $(NAN_DIR)wpa_supp/src/crypto/sha384-prf.o\
-                $(NAN_DIR)wpa_supp/src/crypto/sha384.o
-endif
-
-# ---------------------------------------------------
 # HE Objects List
 # ---------------------------------------------------
 
@@ -805,6 +766,19 @@ ifeq ($(CONFIG_MTK_WIFI_TWT_SUPPORT), y)
 MGMT_OBJS += $(MGMT_DIR)twt_req_fsm.o \
              $(MGMT_DIR)twt.o \
              $(MGMT_DIR)twt_planner.o
+endif
+
+ifeq ($(CONFIG_MTK_MCIF_WIFI_SUPPORT), y)
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/mddp/include/
+ccflags-y += -DCFG_MTK_MCIF_WIFI_SUPPORT=1
+ifeq ($(CONFIG_MTK_MDDP_WH_SUPPORT), y)
+ccflags-y += -DCFG_MTK_MDDP_WH_SUPPORT=1
+else
+ccflags-y += -DCFG_MTK_MDDP_WH_SUPPORT=0
+endif
+else
+ccflags-y += -DCFG_MTK_MCIF_WIFI_SUPPORT=0
+ccflags-y += -DCFG_MTK_MDDP_WH_SUPPORT=0
 endif
 
 ifeq ($(CONFIG_MTK_COMBO_WIFI_HIF), sdio)
@@ -868,6 +842,7 @@ endif
 SERVICE_DIR  := wlan_service/
 
 MTK_WLAN_SERVICE=yes
+
 ifeq ($(MTK_WLAN_SERVICE), yes)
 ccflags-y += -DCONFIG_WLAN_SERVICE=1
 ccflags-y += -DCONFIG_TEST_ENGINE_OFFLOAD=1

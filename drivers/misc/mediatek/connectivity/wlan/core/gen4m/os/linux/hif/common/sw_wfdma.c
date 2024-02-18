@@ -67,45 +67,10 @@
  *******************************************************************************
  */
 
-void halSwWfdmaInit(struct GLUE_INFO *prGlueInfo)
+void halSwWfdmaInit(struct SW_WFDMA_INFO *prSwWfdmaInfo)
 {
-	struct mt66xx_chip_info *prChipInfo;
-	struct BUS_INFO *prBusInfo;
-	struct SW_WFDMA_INFO *prSwWfdmaInfo;
-	uint32_t u4Value = 0;
 #if CFG_MTK_ANDROID_EMI
 	void __iomem *pucEmiBaseAddr = NULL;
-#endif
-
-	prChipInfo = prGlueInfo->prAdapter->chip_info;
-	prBusInfo = prChipInfo->bus_info;
-	prSwWfdmaInfo = &prBusInfo->rSwWfdmaInfo;
-
-	if (!prSwWfdmaInfo->fgIsEnSwWfdma)
-		return;
-
-	prSwWfdmaInfo->u4PortIdx = TX_RING_CMD_IDX_3;
-
-	/* update sw wfdma emi offset */
-	if (prSwWfdmaInfo->u4EmiOffsetAddr) {
-		kalDevRegRead(prGlueInfo,
-			      prSwWfdmaInfo->u4EmiOffsetAddr,
-			      &u4Value);
-		u4Value = (u4Value & prSwWfdmaInfo->u4EmiOffsetMask) |
-			prSwWfdmaInfo->u4EmiOffsetBase;
-		if (u4Value)
-			prSwWfdmaInfo->u4EmiOffset = u4Value;
-		DBGLOG(INIT, INFO, "EMI offset[0x%x]\n", u4Value);
-	}
-
-	if (!prSwWfdmaInfo->fgIsEnSwWfdma)
-		return;
-
-#if CFG_MTK_ANDROID_EMI
-	if (prSwWfdmaInfo->pucIoremapAddr) {
-		DBGLOG(INIT, ERROR, "prDmad already remap\n");
-		return;
-	}
 
 	if (!gConEmiPhyBaseFinal) {
 		DBGLOG(INIT, ERROR,
@@ -114,17 +79,16 @@ void halSwWfdmaInit(struct GLUE_INFO *prGlueInfo)
 	}
 
 	request_mem_region(
-		gConEmiPhyBaseFinal + prSwWfdmaInfo->u4EmiOffset,
+		gConEmiPhyBaseFinal + SW_WFDMA_EMI_OFFSET,
 		SW_WFDMA_EMI_SIZE,
 		"WIFI-SW-WFDMA");
-	pucEmiBaseAddr = ioremap(
-		gConEmiPhyBaseFinal + prSwWfdmaInfo->u4EmiOffset,
+	pucEmiBaseAddr = ioremap_nocache(
+		gConEmiPhyBaseFinal + SW_WFDMA_EMI_OFFSET,
 		SW_WFDMA_EMI_SIZE);
 
 	DBGLOG_LIMITED(INIT, INFO,
-		       "EmiPhyBase:0x%llx offset:0x%x, ioremap region 0x%lX @ 0x%p\n",
-		       (uint64_t)gConEmiPhyBaseFinal,
-		       prSwWfdmaInfo->u4EmiOffset,
+		       "EmiPhyBase:0x%llx offset:0x%x, ioremap region 0x%lX @ 0x%lX\n",
+		       (uint64_t)gConEmiPhyBaseFinal, SW_WFDMA_EMI_OFFSET,
 		       gConEmiSizeFinal, pucEmiBaseAddr);
 
 	if (!pucEmiBaseAddr) {
@@ -139,51 +103,21 @@ void halSwWfdmaInit(struct GLUE_INFO *prGlueInfo)
 #endif /* CFG_MTK_ANDROID_EMI */
 }
 
-void halSwWfdmaUninit(struct GLUE_INFO *prGlueInfo)
+void halSwWfdmaUninit(struct SW_WFDMA_INFO *prSwWfdmaInfo)
 {
-	struct mt66xx_chip_info *prChipInfo;
-	struct BUS_INFO *prBusInfo;
-	struct SW_WFDMA_INFO *prSwWfdmaInfo;
-
-	prChipInfo = prGlueInfo->prAdapter->chip_info;
-	prBusInfo = prChipInfo->bus_info;
-	prSwWfdmaInfo = &prBusInfo->rSwWfdmaInfo;
-
 #if CFG_MTK_ANDROID_EMI
 	if (!prSwWfdmaInfo->pucIoremapAddr) {
-		DBGLOG(INIT, ERROR, "prDmad not remap\n");
+		DBGLOG(INIT, ERROR, "prDmad not alloc\n");
 		return;
 	}
 
-	DBGLOG_LIMITED(INIT, INFO, "iounmap 0x%p\n",
+	DBGLOG_LIMITED(INIT, INFO, "iounmap 0x%lX\n",
 		       prSwWfdmaInfo->pucIoremapAddr);
 	iounmap(prSwWfdmaInfo->pucIoremapAddr);
 	release_mem_region(
-		gConEmiPhyBase + prSwWfdmaInfo->u4EmiOffset,
+		gConEmiPhyBase + SW_WFDMA_EMI_OFFSET,
 		SW_WFDMA_EMI_SIZE);
 #endif /* CFG_MTK_ANDROID_EMI */
-	prSwWfdmaInfo->pucIoremapAddr = NULL;
-	prSwWfdmaInfo->prDmad = NULL;
-}
-
-void halSwWfdmaEn(struct GLUE_INFO *prGlueInfo, bool fgEn)
-{
-	struct mt66xx_chip_info *prChipInfo;
-	struct BUS_INFO *prBusInfo;
-	struct SW_WFDMA_INFO *prSwWfdmaInfo;
-
-	prChipInfo = prGlueInfo->prAdapter->chip_info;
-	prBusInfo = prChipInfo->bus_info;
-	prSwWfdmaInfo = &prBusInfo->rSwWfdmaInfo;
-
-	if (prSwWfdmaInfo->fgIsEnSwWfdma == fgEn)
-		return;
-
-	prSwWfdmaInfo->fgIsEnSwWfdma = fgEn;
-	if (fgEn)
-		halSwWfdmaInit(prGlueInfo);
-	else
-		halSwWfdmaUninit(prGlueInfo);
 }
 
 void halSwWfdmaReset(struct SW_WFDMA_INFO *prSwWfdmaInfo)
@@ -214,10 +148,7 @@ void halSwWfdmaBackup(struct GLUE_INFO *prGlueInfo)
 	if (!prSwWfdmaInfo->fgIsEnSwWfdma || !prSwWfDmad)
 		return;
 
-	prSwWfdmaInfo->u4CpuIdxBackup = prSwWfdmaInfo->u4CpuIdx;
-	prSwWfdmaInfo->u4DmaIdxBackup = prSwWfdmaInfo->u4DmaIdx;
-
-	kalMemCopyFromIo(&prSwWfdmaInfo->rBackup, prSwWfDmad,
+	memcpy_fromio(&prSwWfdmaInfo->rBackup, prSwWfDmad,
 		      sizeof(struct SW_WFDMAD));
 }
 
@@ -238,11 +169,8 @@ void halSwWfdmaRestore(struct GLUE_INFO *prGlueInfo)
 	if (!prSwWfdmaInfo->fgIsEnSwWfdma || !prSwWfDmad)
 		return;
 
-	prSwWfdmaInfo->u4CpuIdx = prSwWfdmaInfo->u4CpuIdxBackup;
-	prSwWfdmaInfo->u4DmaIdx = prSwWfdmaInfo->u4DmaIdxBackup;
-
 	while (prBackup->u4FwIdx != prBackup->u4DrvIdx) {
-		kalMemCopyToIo(prSwWfDmad->aucBuf[prSwWfDmad->u4DrvIdx],
+		memcpy_toio(prSwWfDmad->aucBuf[prSwWfDmad->u4DrvIdx],
 			    prBackup->aucBuf[prBackup->u4FwIdx],
 			    SW_WFDMA_CMD_PKT_SIZE);
 		ucCID = prSwWfdmaInfo->aucCID[prSwWfDmad->u4DrvIdx];
@@ -259,10 +187,10 @@ void halSwWfdmaRestore(struct GLUE_INFO *prGlueInfo)
 		       prBackup->u4FwIdx,
 		       ucCID);
 
-		if (prSwWfdmaInfo->rOps.triggerInt)
-			prSwWfdmaInfo->rOps.triggerInt(prGlueInfo);
-		else
-			DBGLOG(HAL, ERROR, "triggerInt callback is null!\n");
+		/* trigger ccif channel 4 interrupt */
+		if (wf_ioremap_write(SW_WFDMA_PCCIF_TCHNUM,
+				     SW_WFDMA_CCIF_CHANNEL_NUM))
+			DBGLOG(HAL, ERROR, "ioremap write fail!\n");
 	}
 }
 
@@ -349,10 +277,7 @@ bool halSwWfdmaWriteCmd(struct GLUE_INFO *prGlueInfo)
 	prSwWfdmaInfo = &prBusInfo->rSwWfdmaInfo;
 	prSwWfDmad = prSwWfdmaInfo->prDmad;
 
-	prTxRing = &prHifInfo->TxRing[TX_RING_CMD_IDX_3];
-
-	if (!prSwWfdmaInfo->fgIsEnSwWfdma || !prSwWfDmad)
-		return false;
+	prTxRing = &prHifInfo->TxRing[TX_RING_CMD_IDX_2];
 
 	if (prSwWfdmaInfo->u4DmaIdx == prSwWfdmaInfo->u4CpuIdx)
 		return false;
@@ -380,7 +305,7 @@ bool halSwWfdmaWriteCmd(struct GLUE_INFO *prGlueInfo)
 			continue;
 		}
 
-		kalMemCopyToIo(prBuf, (void *)pTxCell->DmaBuf.AllocVa, u4Size);
+		memcpy_toio(prBuf, (void *)pTxCell->DmaBuf.AllocVa, u4Size);
 		pTxD->DMADONE = 1;
 
 		prSwWfdmaInfo->u4DmaIdx =
@@ -388,19 +313,17 @@ bool halSwWfdmaWriteCmd(struct GLUE_INFO *prGlueInfo)
 		prSwWfDmad->u4DrvIdx =
 			(prSwWfDmad->u4DrvIdx + 1) % SW_WFDMA_CMD_NUM;
 
-		DBGLOG_LIMITED(
-			HAL, INFO,
-			"Write CMD DRV[%u] FW[%u] CID[0x%02X]\n",
-			prSwWfDmad->u4DrvIdx,
-			prSwWfDmad->u4FwIdx,
-			prCmdInfo ? prCmdInfo->ucCID : 0);
+		DBGLOG(HAL, INFO, "Write CMD DRV[%u] FW[%u] CID[0x%02X]\n",
+		       prSwWfDmad->u4DrvIdx,
+		       prSwWfDmad->u4FwIdx,
+		       prCmdInfo ? prCmdInfo->ucCID : 0);
 
 		DBGLOG_MEM32(HAL, TRACE, prBuf, u4Size);
 
-		if (prSwWfdmaInfo->rOps.triggerInt)
-			prSwWfdmaInfo->rOps.triggerInt(prGlueInfo);
-		else
-			DBGLOG(HAL, ERROR, "triggerInt callback is null!\n");
+		/* trigger ccif channel 4 interrupt */
+		if (wf_ioremap_write(SW_WFDMA_PCCIF_TCHNUM,
+				     SW_WFDMA_CCIF_CHANNEL_NUM))
+			DBGLOG(HAL, ERROR, "ioremap write fail!\n");
 	}
 
 	return true;
@@ -408,18 +331,7 @@ bool halSwWfdmaWriteCmd(struct GLUE_INFO *prGlueInfo)
 
 bool halSwWfdmaProcessDmaDone(struct GLUE_INFO *prGlueInfo)
 {
-	struct mt66xx_chip_info *prChipInfo;
-	struct BUS_INFO *prBusInfo;
-	struct SW_WFDMA_INFO *prSwWfdmaInfo;
-
-	prChipInfo = prGlueInfo->prAdapter->chip_info;
-	prBusInfo = prChipInfo->bus_info;
-	prSwWfdmaInfo = &prBusInfo->rSwWfdmaInfo;
-
-	if (!prSwWfdmaInfo->fgIsEnSwWfdma)
-		return false;
-
-	halWpdmaProcessCmdDmaDone(prGlueInfo, TX_RING_CMD_IDX_3);
+	halWpdmaProcessCmdDmaDone(prGlueInfo, TX_RING_CMD_IDX_2);
 	return halSwWfdmaWriteCmd(prGlueInfo);
 }
 
@@ -436,20 +348,17 @@ void halSwWfdmaDumpDebugLog(struct GLUE_INFO *prGlueInfo)
 	prSwWfdmaInfo = &prBusInfo->rSwWfdmaInfo;
 	prSwWfDmad = prSwWfdmaInfo->prDmad;
 
-	DBGLOG(HAL, INFO,
-	       "EN[%u], CIDX[%u] DIDX[%u] MCNT[%u] ADDR[0x%lX] OFFSET[0x%X]\n",
+	DBGLOG(HAL, INFO, "EN[%u], CIDX[%u] DIDX[%u] MCNT[%u] ADDR[0x%lX]\n",
 	       prSwWfdmaInfo->fgIsEnSwWfdma,
 	       prSwWfdmaInfo->u4CpuIdx,
 	       prSwWfdmaInfo->u4DmaIdx,
 	       prSwWfdmaInfo->u4MaxCnt,
-	       prSwWfdmaInfo->pucIoremapAddr,
-	       prSwWfdmaInfo->u4EmiOffset);
+	       prSwWfdmaInfo->pucIoremapAddr);
 
 	if (!prSwWfDmad)
 		return;
 
-	if (prSwWfdmaInfo->rOps.getIntSta)
-		prSwWfdmaInfo->rOps.getIntSta(prGlueInfo, &u4Val);
+	wf_ioremap_read(SW_WFDMA_PCCIF_START, &u4Val);
 	DBGLOG(HAL, INFO, "DRV[%u] FW[%u] STA[0x%X]\n",
 	       prSwWfDmad->u4DrvIdx, prSwWfDmad->u4FwIdx, u4Val);
 	for (u4Idx = 0; u4Idx < SW_WFDMA_CMD_NUM; u4Idx++) {
