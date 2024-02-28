@@ -115,7 +115,6 @@ obj-$(CONFIG_MTK_USBFSH) += usb11/
 obj-$(CONFIG_MTK_BOOT) += boot/
 obj-$(CONFIG_MTK_BOOT_REASON) += boot_reason/
 obj-$(CONFIG_MTK_CHIP) += chip/
-obj-$(CONFIG_MTK_DEVAPC) += devapc/
 obj-$(CONFIG_MTK_SYNC) += sync/
 obj-$(CONFIG_MICROTRUST_TEE_SUPPORT) += teei/
 obj-$(CONFIG_TRUSTKERNEL_TEE_SUPPORT) += tkcore/
