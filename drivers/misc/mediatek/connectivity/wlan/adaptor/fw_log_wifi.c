@@ -46,7 +46,7 @@ MODULE_LICENSE("Dual BSD/GPL");
 #define WIFI_FW_LOG_WARN            1
 #define WIFI_FW_LOG_ERR             0
 
-uint32_t fwDbgLevel = WIFI_FW_LOG_ERR;
+uint32_t fwDbgLevel = WIFI_FW_LOG_DBG;
 unsigned int gLastFWLogOnOff;
 int gFwLogOnOffStatus;	/* 0: default, 1: success, -1: fail */
 
