@@ -1975,7 +1975,7 @@ static inline void printk_delay(void)
 		int m = printk_delay_msec;
 
 		while (m--) {
-			mdelay(1);
+			mdelay(5);
 			touch_nmi_watchdog();
 		}
 	}
